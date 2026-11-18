@@ -63,7 +63,7 @@ export async function raydiumFor(owner: Keypair) {
 // --- state: what was created, so later steps and the keeper can find it ---
 export type State = {
   network: string
-  token?: { mint: string; decimals: number; supply: string; name: string; symbol: string }
+  token?: { mint: string; decimals: number; supply: string; name: string; symbol: string; uri?: string }
   quote?: { mint: string; decimals: number }
   pool?: { id: string; lpMint: string; mintA: string; mintB: string }
   lock?: { nftMint: string; lpLocked: string; owner: string }

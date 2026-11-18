@@ -60,16 +60,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     access: 'public', contentType: kind.type, addRandomSuffix: false, allowOverwrite: true,
   })
 
+  const links = {
+    x: social(body.x, 'x'),
+    telegram: social(body.telegram, 'telegram'),
+    website: social(body.website, 'website'),
+  }
+  // Metaplex-standard fields (image, external_url, properties.files) plus the
+  // `extensions` that explorers and DEX UIs read for socials, and our own `links`.
   const metadata = {
     name,
     symbol,
     description,
     image: image.url,
-    links: {
-      x: social(body.x, 'x'),
-      telegram: social(body.telegram, 'telegram'),
-      website: social(body.website, 'website'),
+    ...(links.website ? { external_url: links.website } : {}),
+    properties: { files: [{ uri: image.url, type: kind.type }], category: 'image' },
+    extensions: {
+      ...(links.website ? { website: links.website } : {}),
+      ...(links.x ? { twitter: links.x } : {}),
+      ...(links.telegram ? { telegram: links.telegram } : {}),
     },
+    links,
   }
   const json = JSON.stringify(metadata)
   const metaHash = createHash('sha256').update(json).digest('hex')
