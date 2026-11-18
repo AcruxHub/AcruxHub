@@ -27,10 +27,30 @@ export const NETWORKS: Record<Network['id'], Network> = {
   },
 }
 
-/** Tokens the faucet hands out on Acrux Net (live mints from getDemoPool; they differ from the repo genesis file). */
+/**
+ * Tokens the faucet hands out on Acrux Net. These are only the last known mints:
+ * every Acrux Net restart can mint new ones, so `refreshDemoTokens` replaces them
+ * with the live set from the gateway's getDemoPool on load.
+ */
 export const KNOWN_TOKENS: Record<string, { symbol: string; name: string; decimals: number }> = {
   '713QqmE1xGXS8vACKxfxyr5YvtitXymtiR45E3egsdss': { symbol: 'AXA', name: 'Acrux Demo A', decimals: 6 },
   '28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td': { symbol: 'AXB', name: 'Acrux Demo B', decimals: 6 },
+}
+
+/** Loads the live demo-token mints; returns true if anything changed. */
+export async function refreshDemoTokens(n: Network): Promise<boolean> {
+  if (!n.gateway) return false
+  try {
+    const pool = await n.gateway.call<{ mints: { address: string; symbol: string; name: string; decimals: number }[] }>('getDemoPool', {})
+    const live = Object.fromEntries(pool.mints.map(m => [m.address, { symbol: m.symbol, name: m.name, decimals: m.decimals }]))
+    const same = Object.keys(live).length === Object.keys(KNOWN_TOKENS).length && Object.keys(live).every(k => KNOWN_TOKENS[k])
+    if (same) return false
+    for (const k of Object.keys(KNOWN_TOKENS)) delete KNOWN_TOKENS[k]
+    Object.assign(KNOWN_TOKENS, live)
+    return true
+  } catch {
+    return false // keep the last known set
+  }
 }
 
 export const connectionFor = (n: Network) => new Connection(n.rpc, 'confirmed')

@@ -89,6 +89,19 @@ Deploying to Acrux needs `--use-rpc` (Acrux has no TPU port):
 solana program deploy --use-rpc -u https://rpc.acrux.computer --program-id <keypair> target/deploy/acruxhub_amm.so
 ```
 
+## After an Acrux Net reset
+
+Acrux Net starts from a fresh genesis on every restart, which wipes deployed programs and their accounts. Restore everything with one command:
+
+```bash
+node --import tsx scripts/acrux-redeploy.ts --check   # what's missing (changes nothing)
+node --import tsx scripts/acrux-redeploy.ts           # restore (add --wait to pause for an ACRUX top-up)
+```
+
+It redeploys the AMM and the launchpad at the **same addresses** (same program keypairs, so the site needs no change), recreates the AXA/AXB pool, and initializes the launchpad (quote AXB, fees to the treasury). Each step checks the chain first, so re-running is safe.
+
+Funding: the two deploys need about 5.3 + 6.6 ACRUX at their peaks (deploy buffers are refunded after). The faucet gives 3 × 2 ACRUX per key per 24 hours, so a full restore usually needs a top-up to the deployer, and the script prints exactly how much. The site reads the demo-token mints live from `getDemoPool`, since a restart can change them.
+
 ## Acrux Net quirks we hit
 
 - `getProgramAccounts` ignores `memcmp` filters, so Anchor's `.all()` returns every account a program owns. Use `allAccounts()` from the SDK, which filters on the client.

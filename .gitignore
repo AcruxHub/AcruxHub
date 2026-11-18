@@ -15,3 +15,4 @@ tests/vectors/
 .gh-config/
 launch/state-local.json
 launch/keeper-log-local.jsonl
+scripts/.redeploy-local.json

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useWallet } from './wallet.tsx'
-import { short, NETWORKS } from './net.ts'
+import { short, NETWORKS, refreshDemoTokens } from './net.ts'
 import { useAsync, deployed } from './hooks.ts'
 import { Swap } from './pages/Swap.tsx'
 import { Pools } from './pages/Pools.tsx'
@@ -33,6 +33,8 @@ export function App() {
     return () => removeEventListener('hashchange', on)
   }, [])
   const live = useAsync(() => deployed(w.conn), [w.conn])
+  // Demo-token mints can change when Acrux Net restarts: load the live ones.
+  useEffect(() => { refreshDemoTokens(w.network).then(changed => { if (changed) w.bump() }) }, [w.network])
 
   return (
     <div className="app">
