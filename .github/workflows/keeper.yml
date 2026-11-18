@@ -1,0 +1,110 @@
+name: Keeper
+
+# Claims the locked LP's trading fees and splits them 50/50:
+#   50% to the treasury, 50% bought back and burned (see launch/README.md).
+#
+# Off until the token exists. To turn it on (repo Settings -> Secrets and variables -> Actions):
+#   secret   KEEPER_KEY      the keeper wallet's secret key (JSON array); it holds the fee-key NFT
+#   secret   RPC_URL         a Solana mainnet RPC URL (recommended; the public one rate-limits)
+#   variable TREASURY        the treasury address that receives 50%
+#   variable KEEPER_ENABLED  true
+# and commit launch/state-mainnet.json (pool id, fee-key NFT, mints; public data).
+#
+# Every action is appended to keeper-log-mainnet.jsonl on the `keeper-log` branch.
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write # only to push the public action log to the keeper-log branch
+
+concurrency:
+  group: keeper
+  cancel-in-progress: false
+
+jobs:
+  keeper:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check configuration
+        id: cfg
+        env:
+          ENABLED: ${{ vars.KEEPER_ENABLED }}
+          TREASURY: ${{ vars.TREASURY }}
+          HAS_KEY: ${{ secrets.KEEPER_KEY != '' }}
+        run: |
+          missing=""
+          [ "$ENABLED" = "true" ] || missing="$missing KEEPER_ENABLED"
+          [ -n "$TREASURY" ] || missing="$missing TREASURY"
+          [ "$HAS_KEY" = "true" ] || missing="$missing KEEPER_KEY"
+          if [ -n "$missing" ]; then
+            echo "Keeper not enabled yet (missing:$missing). Skipping." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.cfg.outputs.run == 'true'
+        with:
+          fetch-depth: 0
+
+      - name: Require the mainnet launch state
+        if: steps.cfg.outputs.run == 'true'
+        run: |
+          test -f launch/state-mainnet.json || { echo "launch/state-mainnet.json is not committed" >&2; exit 1; }
+          node -e 'const s=require("./launch/state-mainnet.json"); if(!s.pool||!s.lock||!s.token||!s.quote) throw new Error("state incomplete")'
+
+      - uses: actions/setup-node@v5
+        if: steps.cfg.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        if: steps.cfg.outputs.run == 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Restore the action log
+        if: steps.cfg.outputs.run == 'true'
+        run: |
+          git fetch origin keeper-log 2>/dev/null && git show origin/keeper-log:keeper-log-mainnet.jsonl > launch/keeper-log-mainnet.jsonl || true
+          wc -l launch/keeper-log-mainnet.jsonl 2>/dev/null || echo "no log yet"
+
+      - name: Run the keeper once
+        if: steps.cfg.outputs.run == 'true'
+        env:
+          NETWORK: mainnet
+          RPC: ${{ secrets.RPC_URL }}
+          TREASURY: ${{ vars.TREASURY }}
+          KEEPER_KEY: ${{ secrets.KEEPER_KEY }}
+        run: |
+          umask 077
+          mkdir -p keys
+          printf '%s' "$KEEPER_KEY" > keys/mainnet-keeper.json
+          # Fall back to the public RPC if no RPC_URL secret is set.
+          if [ -z "$RPC" ]; then unset RPC; fi
+          node --import tsx launch/src/keeper.ts --once --yes
+          rm -f keys/mainnet-keeper.json
+
+      - name: Publish the action log
+        if: steps.cfg.outputs.run == 'true' && always()
+        run: |
+          test -s launch/keeper-log-mainnet.jsonl || exit 0
+          cp launch/keeper-log-mainnet.jsonl /tmp/log.jsonl
+          git config user.name "acruxhub-keeper"
+          git config user.email "keeper@acruxhub.invalid"
+          if git ls-remote --exit-code --heads origin keeper-log >/dev/null; then
+            git checkout -B keeper-log origin/keeper-log
+          else
+            git checkout --orphan keeper-log
+            git rm -rf --quiet . || true
+          fi
+          cp /tmp/log.jsonl keeper-log-mainnet.jsonl
+          git add keeper-log-mainnet.jsonl
+          if git diff --cached --quiet; then echo "no new actions"; exit 0; fi
+          git commit -q -m "keeper: $(tail -n 1 keeper-log-mainnet.jsonl | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);console.log(j.action,j.time)})')"
+          git push -q origin keeper-log

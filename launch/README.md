@@ -52,6 +52,25 @@ Costs: Raydium charges a 0.15 SOL pool creation fee, plus about 0.05–0.1 SOL o
 
 The opening price is `ACRUX amount / token amount`. Whoever creates the pool sets it, so pick both amounts deliberately.
 
+### Running the keeper on GitHub Actions
+
+`.github/workflows/keeper.yml` runs the keeper every 30 minutes (and on demand from the Actions tab). It does nothing until it's switched on. To turn it on, in repo **Settings → Secrets and variables → Actions**:
+
+| Kind | Name | Value |
+|---|---|---|
+| Secret | `KEEPER_KEY` | contents of `keys/mainnet-keeper.json` (the JSON array) |
+| Secret | `RPC_URL` | a Solana mainnet RPC URL (Helius or QuickNode free tier; the public RPC rate-limits) |
+| Variable | `TREASURY` | the treasury address that receives 50% |
+| Variable | `KEEPER_ENABLED` | `true` |
+
+Then commit `launch/state-mainnet.json`, which `create-pool.ts` writes. It holds only public addresses.
+
+- **The action log:** every claim, buyback and burn is appended to `keeper-log-mainnet.jsonl` on the `keeper-log` branch, a public record anyone can audit.
+- **Scheduling:** runs never overlap, and a failed run just retries on the next schedule.
+- **GitHub's 60-day rule:** GitHub pauses scheduled workflows in public repos after 60 days without commits to the default branch. Commit occasionally, or re-enable the workflow from the Actions tab if it pauses.
+- **Keep the keeper wallet lean:** about 0.05 SOL for fees is enough. It holds the fee-key NFT, so **back up `keys/mainnet-keeper.json` offline.** GitHub secrets can't be read back, and losing the key loses the fee stream for good.
+- **Buyback slippage:** each buyback allows up to 2% slippage and runs on a predictable schedule, so keep claims frequent and small, which the 30-minute cadence does.
+
 ### Token metadata
 
 `create-token.ts` uploads the image (PNG/JPG/GIF/WebP, max 1 MB) and details through `acruxhub.com/api/upload`, which stores them under content hashes. Or pass `--uri <metadata json url>` to host them yourself. Limits: name 32 bytes, ticker 1–10 capitals or digits, URI 200 bytes.
