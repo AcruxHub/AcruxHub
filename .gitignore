@@ -13,3 +13,5 @@ brand/node_modules/
 .tmp/
 tests/vectors/
 .gh-config/
+launch/state-*.json
+launch/keeper-log-local.jsonl
