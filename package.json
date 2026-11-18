@@ -1,0 +1,19 @@
+{
+  "name": "acruxhub",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "sdk",
+    "relayer",
+    "web"
+  ],
+  "scripts": {
+    "test:unit": "node --import tsx --test tests/seal.test.ts",
+    "test:e2e": "node --import tsx --test --test-concurrency=1 tests/amm.e2e.ts tests/launchpad.e2e.ts tests/bridge.e2e.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "4.19.2",
+    "typescript": "5.7.2"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@acruxhub/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": {
+    "@coral-xyz/anchor": "0.31.1",
+    "@noble/ciphers": "1.2.1",
+    "@noble/curves": "1.8.1",
+    "@noble/hashes": "1.7.1",
+    "@solana/spl-token": "0.4.9",
+    "@solana/web3.js": "1.98.0",
+    "bs58": "6.0.0"
+  }
+}

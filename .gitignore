@@ -1,0 +1,15 @@
+target/
+node_modules/
+dist/
+keys/*.json
+.anchor/
+test-ledger/
+*.log
+.env
+.wslcmd.sh
+brand/node_modules/
+.vercel/
+.vercel-global/
+.tmp/
+tests/vectors/
+.gh-config/
