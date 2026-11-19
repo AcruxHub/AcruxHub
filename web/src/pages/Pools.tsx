@@ -27,10 +27,10 @@ export function Pools() {
   const lpOf = (m: Market) => mine.data?.find(h => h.mint === lpMintOf(m).toBase58())?.amount ?? 0n
 
   return (
+    <>
+    <div className="page-head"><div><h1>Pools</h1><p>AcruxHub and Raydium CPMM pools on Acrux, side by side. Add liquidity to either, or create a new one.</p></div></div>
     <div className="grid">
-      <div className="card" style={{ gridColumn: '1 / -1' }}>
-        <h2>Pools</h2>
-        <p className="muted" style={{ marginTop: 0 }}>AcruxHub pools and Raydium CPMM pools on Acrux, side by side. Add liquidity to either, or create a new one below.</p>
+      <div className="card" style={{ gridColumn: '1 / -1', padding: '8px 20px 4px' }}>
         {markets.loading && !markets.data && <Empty>Loading…</Empty>}
         {markets.error && <Empty>{markets.error}</Empty>}
         {markets.data && !markets.data.length && <Empty>No pools yet.</Empty>}
@@ -63,6 +63,7 @@ export function Pools() {
       {market?.kind === 'raydium' && <ManageRaydium key={sel} market={market} label={label} lp={lpOf(market)} />}
       <CreatePool />
     </div>
+    </>
   )
 }
 

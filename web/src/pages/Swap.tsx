@@ -92,16 +92,17 @@ export function Swap() {
 
   const caPoolCount = caPairs.reduce((n, p) => n + p.markets.length, 0)
   return (
-    <div className="card narrow">
-      <h2>Swap</h2>
+    <div className="narrow">
+    <div className="page-head"><div><h1>Swap</h1><p>Best price across AcruxHub and Raydium pools, sealed against front-running.</p></div></div>
+    <div className="card">
       <div className="field">
-        <label>Paste a token address (CA)</label>
+        <label>Token address (CA)</label>
         <input
           className="mono"
           value={ca}
           onChange={e => setCa(e.target.value)}
           onPaste={e => { const t = e.clipboardData.getData('text').trim(); if (t) { e.preventDefault(); setCa(t) } }}
-          placeholder="Token mint address"
+          placeholder="Paste a token's CA to find its pools"
           spellCheck={false}
         />
         {ca.trim() && !caKey && <small className="error">That isn't a valid address.</small>}
@@ -129,20 +130,26 @@ export function Swap() {
       </div>
       {pair && inMint && outMint && (
         <>
-          <div className="field">
-            <label>You pay ({label(inMint)}){balIn.data != null && <> · balance {fmt(balIn.data, inDec)}</>}</label>
-            <input inputMode="decimal" placeholder="0.0" value={amount} onChange={e => setAmount(e.target.value)} />
-          </div>
-          <button className="flip" title="Flip direction" onClick={() => setAToB(d => !d)}>⇅</button>
-          <div className="field">
-            <label>You receive ({label(outMint)})</label>
-            <input readOnly value={best ? fmt(best.out, outDec) : ''} placeholder="0.0" />
-          </div>
-          <div className="row" style={{ marginBottom: 12 }}>
-            <div className="field" style={{ margin: 0 }}>
-              <label>Max slippage %</label>
-              <input inputMode="decimal" value={slip} onChange={e => setSlip(e.target.value)} />
+          <div className="token-box">
+            <div className="token-box-head"><span>You pay</span>{balIn.data != null && <button className="ghost bal" onClick={() => setAmount(fmt(balIn.data!, inDec, inDec).replace(/,/g, ''))}>Balance <span className="num">{fmt(balIn.data, inDec)}</span></button>}</div>
+            <div className="token-box-row">
+              <input inputMode="decimal" placeholder="0.0" value={amount} onChange={e => setAmount(e.target.value)} aria-label="Amount to pay" />
+              <span className="token-badge">{label(inMint)}</span>
             </div>
+          </div>
+          <button className="flip" title="Flip direction" aria-label="Flip direction" onClick={() => setAToB(d => !d)}>⇅</button>
+          <div className="token-box">
+            <div className="token-box-head"><span>You receive</span></div>
+            <div className="token-box-row">
+              <input readOnly value={best ? fmt(best.out, outDec) : ''} placeholder="0.0" aria-label="Amount received" />
+              <span className="token-badge">{label(outMint)}</span>
+            </div>
+          </div>
+          <div className="quote-line" style={{ margin: '12px 0' }}>
+            <span>Max slippage</span>
+            <span className="seg" style={{ padding: 2 }}>{['0.5', '1', '3'].map(v => <button key={v} className={slip === v ? 'on' : ''} style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setSlip(v)}>{v}%</button>)}</span>
+          </div>
+          <div className="details">
             <dl className="kv" style={{ margin: 0 }}>
               <dt>Route</dt><dd>{best ? <>{marketName(best.m)} <span className="muted">{pct(best.m.feePpm)}</span></> : '–'}</dd>
               <dt>Price impact</dt><dd>{best ? (impactBps / 100).toFixed(2) + '%' : '–'}</dd>
@@ -192,15 +199,13 @@ export function Swap() {
               This swap went out as a public send. Turn on private sends to seal your next one.
             </p>
           )}
-          <p className="muted" style={{ fontSize: 13 }}>
-            AcruxHub checks every pool for the pair, its own and Raydium's, and routes your swap to the one that pays the most.
-            {feeTo && <> A {PLATFORM_FEE_BPS / 100}% AcruxHub fee is taken from what you pay, on top of the pool's own fee.</>}
-          </p>
-          <p className="muted" style={{ fontSize: 13 }}>
-            Private sends split your signed swap into 3 encrypted fragments, one per proposer of the target slot. It becomes readable only once 2 of them have included it, so no single proposer can see it first and trade ahead of you.
-          </p>
         </>
       )}
+    </div>
+    <p className="faint" style={{ fontSize: 12, margin: '12px 4px 0' }}>
+      Every pool for the pair is checked, AcruxHub's and Raydium's, and your swap goes to the one that pays the most.
+      {feeTo && <> A {PLATFORM_FEE_BPS / 100}% AcruxHub fee comes out of what you pay, on top of the pool's fee.</>} Private sends are split 2-of-3 across the slot's proposers, so no single one can read your swap and trade ahead of it. <a href="#Docs/swapping">How it works</a>
+    </p>
     </div>
   )
 }

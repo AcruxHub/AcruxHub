@@ -1,14 +1,14 @@
 import { useState, type ReactNode } from 'react'
 
 /** A button that runs an async action and shows its result or error underneath. */
-export function Action({ label, run, disabled, primary = true }: { label: ReactNode; run: () => Promise<string | void>; disabled?: boolean; primary?: boolean }) {
+export function Action({ label, run, disabled, primary = true, className }: { label: ReactNode; run: () => Promise<string | void>; disabled?: boolean; primary?: boolean; className?: string }) {
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   return (
     <div>
       <button
-        className={primary ? 'primary' : ''}
-        style={{ width: '100%' }}
+        className={className ?? (primary ? 'primary' : '')}
+        style={{ width: '100%', height: 44 }}
         disabled={disabled || busy}
         onClick={async () => {
           setBusy(true)
@@ -74,4 +74,16 @@ export function Empty({ children }: { children: ReactNode }) {
 
 export function NeedWallet() {
   return <Empty>Connect a wallet to continue.</Empty>
+}
+
+const SUBS = '₀₁₂₃₄₅₆₇₈₉'
+/**
+ * A price as text, with the zero count of tiny prices drawn as a real subscript
+ * (0.0₇7766 -> 0.0<sub>7</sub>7766) so it reads at any font size.
+ */
+export function Price({ text }: { text: string }) {
+  const m = text.match(/^0\.0([₀-₉]+)(\d+)$/)
+  if (!m) return <>{text}</>
+  const n = [...m[1]].map(c => SUBS.indexOf(c)).join('')
+  return <>0.0<sub className="zeros">{n}</sub>{m[2]}</>
 }

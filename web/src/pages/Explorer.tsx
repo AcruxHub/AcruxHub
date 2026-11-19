@@ -11,6 +11,8 @@ export function Explorer() {
   const [q, setQ] = useState(initial)
   const [query, setQuery] = useState(initial)
   return (
+    <>
+    <div className="page-head"><div><h1>Explorer</h1><p>Live slots, accounts and transactions on {w.network.name}.</p></div></div>
     <div className="grid">
       <div className="card" style={{ gridColumn: '1 / -1' }}>
         <form className="row" onSubmit={e => { e.preventDefault(); setQuery(q.trim()); location.hash = `Explorer/${encodeURIComponent(q.trim())}` }}>
@@ -20,6 +22,7 @@ export function Explorer() {
       </div>
       {query ? <Result query={query} /> : w.network.gateway ? <NetOverview /> : <LocalOverview />}
     </div>
+    </>
   )
 }
 

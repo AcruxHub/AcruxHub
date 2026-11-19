@@ -31,6 +31,8 @@ export function Portfolio() {
   const lps = toks.filter(t => lpMints.has(t.mint) && t.amount > 0n)
 
   return (
+    <>
+    <div className="page-head"><div><h1>Portfolio</h1><p>Your balance, tokens and liquidity positions on {w.network.name}.</p></div></div>
     <div className="grid">
       <div className="card">
         <h2>Wallet</h2>
@@ -80,5 +82,6 @@ export function Portfolio() {
         }) : <Empty>No LP positions. Add liquidity on the Pools tab.</Empty>}
       </div>
     </div>
+    </>
   )
 }

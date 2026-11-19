@@ -53,7 +53,8 @@ for a default-quote launch.
 2. Upgrade in place: the new binary is 608,560 bytes vs 540,952 live, so the
    program account is extended by about 68 KB first (rent, kept) and the upgrade
    buffer needs about 4.2 ACRUX while it's written (refunded).
-3. Deploy the site from this repo (`scripts/deploy-web.sh`).
+3. Nothing to redeploy: the site reads the program data size and switches to the
+   upgraded IDL by itself (web/src/launchpad.ts). Hard-refresh to check.
 4. When Acrux has a wrapped ACRUX mint:
    `node --import tsx scripts/acrux-launchpad-set-quote.ts <wrapped ACRUX mint> --yes`
 5. Optionally approve more pairs:
