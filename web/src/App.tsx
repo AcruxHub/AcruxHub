@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useWallet } from './wallet.tsx'
 import { KeyBackup, KeyImport } from './keys.tsx'
+import { PageBoundary } from './boundary.tsx'
 import { isNative } from './native.ts'
 import { short, NETWORKS, refreshDemoTokens, LAUNCHES_PAUSED } from './net.ts'
 import { useAsync, deployed } from './hooks.ts'
@@ -75,6 +76,7 @@ export function App() {
       )}
 
       <main>
+        <PageBoundary resetKey={location.hash}>
         {route === 'Launch' && <Launch />}
         {route === 'Swap' && <Swap />}
         {route === 'Pools' && <Pools />}
@@ -82,6 +84,7 @@ export function App() {
         {route === 'Explorer' && <Explorer />}
         {route === 'Portfolio' && <Portfolio />}
         {route === 'Docs' && <Docs />}
+        </PageBoundary>
       </main>
 
       <footer>

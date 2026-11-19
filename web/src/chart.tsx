@@ -40,7 +40,9 @@ export function PriceChart({ points, up }: { points: { time: number; value: numb
     for (const p of points) byTime.set(p.time, p.value)
     s.setData([...byTime.entries()].sort((a, b) => a[0] - b[0]).map(([time, value]) => ({ time: time as UTCTimestamp, value })))
     c.timeScale().fitContent()
-    return () => { c.removeSeries(s) }
+    // On unmount React runs the chart's cleanup first (it's declared first), which
+    // already removed the chart; removing a series from it then throws and blanks the app.
+    return () => { if (chart.current === c) c.removeSeries(s) }
   }, [points, up])
 
   return <div className="chart" ref={el} />
