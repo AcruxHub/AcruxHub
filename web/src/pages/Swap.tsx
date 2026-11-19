@@ -19,6 +19,8 @@ export function Swap() {
   const [aToB, setAToB] = useState(true)
   const [amount, setAmount] = useState('')
   const [slip, setSlip] = useState('0.5')
+  // How the last successful swap went out, for the note under the result.
+  const [lastSend, setLastSend] = useState<'private' | 'public' | null>(null)
   const label = (m: { toBase58(): string }) => tokenLabel(m.toBase58(), symbols.data)
 
   // Every pair, with all the markets (AcruxHub and Raydium pools) that trade it.
@@ -164,18 +166,32 @@ export function Swap() {
             label={w.publicKey ? 'Swap' : 'Connect a wallet'}
             disabled={!w.publicKey || !best || !split || !(slipBps >= 0 && slipBps <= 5000)}
             run={async () => {
+              setLastSend(null)
               const { ixs } = await routedSwapInstructions({
                 market: best!.m, user: w.publicKey!, aToB, amountIn: raw!, minOut: minOut(best!.out, slipBps),
                 feeRecipient: feeTo, amm: ammProgram(w.provider!), deadlineSlot: (await w.conn.getSlot()) + 300,
               })
               const m = best!.m
               const tx = new Transaction().add(...ixs)
+              const sealed = w.privateMode
               const sig = await w.send(tx)
+              setLastSend(sealed ? 'private' : 'public')
               setAmount('')
               w.bump()
               return `Swapped via ${marketName(m)}. ${sig}`
             }}
           />
+          {lastSend === 'private' && (
+            <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+              🔒 Sealed 2-of-3: no single proposer could read this swap before it was ordered, so no one proposer could sandwich it.{' '}
+              <a href="https://acrux.computer/replay" target="_blank" rel="noreferrer">See what sandwiches cost real Solana users →</a>
+            </p>
+          )}
+          {lastSend === 'public' && (
+            <p className="muted" style={{ fontSize: 13, marginTop: 6 }}>
+              This swap went out as a public send. Turn on private sends to seal your next one.
+            </p>
+          )}
           <p className="muted" style={{ fontSize: 13 }}>
             AcruxHub checks every pool for the pair, its own and Raydium's, and routes your swap to the one that pays the most.
             {feeTo && <> A {PLATFORM_FEE_BPS / 100}% AcruxHub fee is taken from what you pay, on top of the pool's own fee.</>}
