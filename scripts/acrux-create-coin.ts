@@ -25,7 +25,7 @@ const launch = launchAddress(mint.publicKey)
 const fee = p.feeRecipient as PublicKey
 const tx = new Transaction().add(
   ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-  await lp.methods.createLaunch(name, symbol, uri).accountsPartial({ creator: kp.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint }).instruction(),
+  await lp.methods.createLaunch(name, symbol, uri).accountsPartial({ creator: kp.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint, quotePair: null }).instruction(),
   createAssociatedTokenAccountIdempotentInstruction(kp.publicKey, getAssociatedTokenAddressSync(quoteMint, fee, true), fee, quoteMint),
   await lp.methods.buy(new BN(buyRaw.toString()), new BN(q.tokensOut.toString())).accountsPartial({
     user: kp.publicKey, launch, mint: mint.publicKey, quoteMint,

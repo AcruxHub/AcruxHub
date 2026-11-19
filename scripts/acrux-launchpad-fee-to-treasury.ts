@@ -91,7 +91,7 @@ const q = curveBuy({
 // launch.fee_recipient and transfers the fee into it. So the buy must simulate OK with
 // the treasury's account and fail with the deployer's (the control).
 const create = await lp.methods.createLaunch('FeeCheck', 'FEE', '')
-  .accountsPartial({ creator: kp.publicKey, config: cfgKey, mint: mint.publicKey, quoteMint: AXB })
+  .accountsPartial({ creator: kp.publicKey, config: cfgKey, mint: mint.publicKey, quoteMint: AXB, quotePair: null })
   .instruction()
 async function simulateBuy(feeQuote: PublicKey) {
   const buy = await lp.methods.buy(new BN(quoteIn.toString()), new BN(q.tokensOut.toString()))

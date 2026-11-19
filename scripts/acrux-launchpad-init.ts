@@ -46,7 +46,7 @@ if (!(await lp.account.config.fetchNullable(launchConfig()))) {
 // Smoke test: launch a token and buy 1 AXB of it.
 const mint = Keypair.generate()
 const create = await lp.methods.createLaunch('AcruxHub', 'HUB', '')
-  .accountsPartial({ creator: kp.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint: AXB })
+  .accountsPartial({ creator: kp.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint: AXB, quotePair: null })
   .transaction()
 console.log('launched HUB', mint.publicKey.toBase58(), await send(create, [mint]))
 

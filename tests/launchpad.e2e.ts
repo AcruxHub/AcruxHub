@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Keypair, PublicKey } from '@solana/web3.js'
-import { getAssociatedTokenAddressSync, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token'
+import { getAccount, getAssociatedTokenAddressSync, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token'
 import { BN } from '@coral-xyz/anchor'
 import {
   launchpadProgram, ammProgram, launchConfig, launchAddress, curveBuy, curveSell, stateOf, graduateAccounts, LAUNCHPAD_ID,
@@ -49,7 +49,7 @@ test('Launchpad: init, launch, buy, sell, complete, graduate into a locked AMM p
   const lpC = launchpadProgram(providerFor(conn, creator))
   const mint = Keypair.generate()
   await lpC.methods.createLaunch('Test Rocket', 'RKT', 'https://example.invalid/rkt.json')
-    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint })
+    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint, quotePair: null })
     .signers([mint]).rpc()
   const launchKey = launchAddress(mint.publicKey)
   let launch = await lp.account.launch.fetch(launchKey)
@@ -142,7 +142,7 @@ test('Launchpad: set_quote moves new launches to a new quote; old launches keep 
   const lpC = launchpadProgram(providerFor(conn, creator))
   const oldMint = Keypair.generate()
   await lpC.methods.createLaunch('Old Quote', 'OLDQ', 'https://example.invalid/old.json')
-    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: oldMint.publicKey, quoteMint: oldQuote })
+    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: oldMint.publicKey, quoteMint: oldQuote, quotePair: null })
     .signers([oldMint]).rpc()
   const oldKey = launchAddress(oldMint.publicKey)
   let oldLaunch = await lp.account.launch.fetch(oldKey)
@@ -178,12 +178,12 @@ test('Launchpad: set_quote moves new launches to a new quote; old launches keep 
   const newMintKp = Keypair.generate()
   await expectError(
     lpC.methods.createLaunch('Wrong', 'WRNG', 'https://example.invalid/w.json')
-      .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: newMintKp.publicKey, quoteMint: oldQuote })
+      .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: newMintKp.publicKey, quoteMint: oldQuote, quotePair: null })
       .signers([newMintKp]).rpc(),
-    'ConstraintAddress',
+    'PairNotAllowed',
   )
   await lpC.methods.createLaunch('New Quote', 'NEWQ', 'https://example.invalid/new.json')
-    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: newMintKp.publicKey, quoteMint: newQuote })
+    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: newMintKp.publicKey, quoteMint: newQuote, quotePair: null })
     .signers([newMintKp]).rpc()
   const newKey = launchAddress(newMintKp.publicKey)
   const newLaunch = await lp.account.launch.fetch(newKey)
@@ -231,4 +231,103 @@ test('Launchpad: set_quote moves new launches to a new quote; old launches keep 
   assert.equal(oldLaunch.graduated, true)
   const pool = await ammProgram(providerFor(conn, buyer)).account.pool.fetch(g.pool)
   assert.ok([pool.mintA, pool.mintB].some((m: PublicKey) => m.equals(oldQuote)), 'graduated pool pairs with the old quote')
+})
+
+test('Launchpad: approved pairs and the emergency pause', async () => {
+  const conn = await waitForChain(CHAIN_B_RPC)
+  const lp = launchpadProgram(providerFor(conn, devWallet))
+  const { launchPairAddress, launchPauseAddress } = await import('../sdk/src/programs.ts')
+  const cfg = await lp.account.config.fetch(launchConfig())
+  const feeRecipient = cfg.params.feeRecipient as PublicKey
+  const stranger = await newUser(conn)
+  const lpS = launchpadProgram(providerFor(conn, stranger))
+  const creator = await newUser(conn)
+  const lpC = launchpadProgram(providerFor(conn, creator))
+
+  // An approved pair: a 6-decimal token with its own parameters.
+  const pairMint = await newMint(conn, devWallet, 6)
+  const pairParams = { ...cfg.params, virtualQuote: new BN('45000000'), graduationQuote: new BN('30000000') }
+  await expectError(
+    lpS.methods.setPair(pairParams, true).accountsPartial({ admin: stranger.publicKey, config: launchConfig(), quoteMint: pairMint }).rpc(),
+    'Unauthorized',
+  )
+  await lp.methods.setPair(pairParams, true).accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), quoteMint: pairMint }).rpc()
+  const pair = await lp.account.quotePair.fetch(launchPairAddress(pairMint))
+  assert.ok(pair.enabled && (pair.mint as PublicKey).equals(pairMint))
+
+  // A coin paired with it takes the pair's parameters and its curve holds the pair token.
+  const paired = Keypair.generate()
+  await lpC.methods.createLaunch('Paired', 'PAIR', 'https://example.invalid/p.json')
+    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: paired.publicKey, quoteMint: pairMint, quotePair: launchPairAddress(pairMint) })
+    .signers([paired]).rpc()
+  const pairedKey = launchAddress(paired.publicKey)
+  const pl = await lp.account.launch.fetch(pairedKey)
+  assert.equal(pl.graduationQuote.toString(), '30000000')
+  assert.equal(pl.virtualQuote.toString(), '45000000')
+  assert.ok((await getAccount(conn, pl.curveQuote)).mint.equals(pairMint))
+
+  // A token that isn't approved, or isn't the default, is refused.
+  const random = await newMint(conn, devWallet, 6)
+  const r1 = Keypair.generate()
+  await expectError(
+    lpC.methods.createLaunch('Nope', 'NOPE', 'https://example.invalid/n.json')
+      .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: r1.publicKey, quoteMint: random, quotePair: null })
+      .signers([r1]).rpc(),
+    'PairNotAllowed',
+  )
+  // Passing an approved pair's account with a different token is refused too.
+  const r2 = Keypair.generate()
+  await expectError(
+    lpC.methods.createLaunch('Mixed', 'MIX', 'https://example.invalid/m.json')
+      .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: r2.publicKey, quoteMint: random, quotePair: launchPairAddress(pairMint) })
+      .signers([r2]).rpc(),
+    'PairNotAllowed',
+  )
+  // A disabled pair can't be used for new coins.
+  await lp.methods.setPair(pairParams, false).accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), quoteMint: pairMint }).rpc()
+  const r3 = Keypair.generate()
+  await expectError(
+    lpC.methods.createLaunch('Off', 'OFF', 'https://example.invalid/o.json')
+      .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: r3.publicKey, quoteMint: pairMint, quotePair: launchPairAddress(pairMint) })
+      .signers([r3]).rpc(),
+    'PairNotAllowed',
+  )
+
+  // The paired coin trades in its pair token (disabling the pair doesn't touch existing coins).
+  const buyer = await newUser(conn)
+  const lpB = launchpadProgram(providerFor(conn, buyer))
+  const feePair = (await getOrCreateAssociatedTokenAccount(conn, devWallet, pairMint, feeRecipient)).address
+  const buyerPair = await giveTokens(conn, devWallet, pairMint, buyer.publicKey, 100_000_000n)
+  const trade = {
+    user: buyer.publicKey, launch: pairedKey, mint: paired.publicKey, quoteMint: pairMint, curveTokens: pl.curveTokens, curveQuote: pl.curveQuote,
+    userTokens: getAssociatedTokenAddressSync(paired.publicKey, buyer.publicKey), userQuote: buyerPair, feeQuote: feePair,
+  }
+  const q = curveBuy(stateOf(pl), 2_000_000n)!
+  await lpB.methods.buy(new BN('2000000'), new BN(q.tokensOut.toString())).accountsPartial(trade).rpc()
+  assert.equal(await balance(conn, trade.userTokens), q.tokensOut)
+
+  // Emergency pause: admin only; blocks launches, buys and sells; unpausing restores them.
+  assert.equal(await conn.getAccountInfo(launchPauseAddress()), null, 'no pause account before first use = not paused')
+  await expectError(
+    lpS.methods.setPaused(true).accountsPartial({ admin: stranger.publicKey, config: launchConfig() }).rpc(),
+    'Unauthorized',
+  )
+  await lp.methods.setPaused(true).accountsPartial({ admin: devWallet.publicKey, config: launchConfig() }).rpc()
+  const r4 = Keypair.generate()
+  await expectError(
+    lpC.methods.createLaunch('Paused', 'PSD', 'https://example.invalid/x.json')
+      .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: r4.publicKey, quoteMint: cfg.quoteMint, quotePair: null })
+      .signers([r4]).rpc(),
+    'Paused',
+  )
+  await expectError(lpB.methods.buy(new BN('1000000'), new BN(1)).accountsPartial(trade).rpc(), 'Paused')
+  await expectError(lpB.methods.sell(new BN((q.tokensOut / 2n).toString()), new BN(1)).accountsPartial(trade).rpc(), 'Paused')
+
+  await lp.methods.setPaused(false).accountsPartial({ admin: devWallet.publicKey, config: launchConfig() }).rpc()
+  const s = curveSell(stateOf(await lp.account.launch.fetch(pairedKey)), q.tokensOut / 2n)!
+  await lpB.methods.sell(new BN((q.tokensOut / 2n).toString()), new BN(s.quoteOut.toString())).accountsPartial(trade).rpc()
+  const r5 = Keypair.generate()
+  await lpC.methods.createLaunch('Back', 'BACK', 'https://example.invalid/b.json')
+    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: r5.publicKey, quoteMint: cfg.quoteMint, quotePair: null })
+    .signers([r5]).rpc()
 })

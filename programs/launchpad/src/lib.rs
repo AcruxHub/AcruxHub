@@ -30,6 +30,10 @@ pub const GRADUATED_POOL_FEE_BPS: u16 = 30;
 /// System-owned PDA (never holds data) that acts as Raydium's pool creator, so it
 /// can both sign for the deposit and pay Raydium's lamport fee and rent.
 pub const GRADUATOR_SEED: &[u8] = b"graduator";
+/// An approved quote token a coin can be paired with, and its curve parameters.
+pub const PAIR_SEED: &[u8] = b"pair";
+/// The emergency pause switch (absent = not paused).
+pub const PAUSE_SEED: &[u8] = b"pause";
 
 #[program]
 pub mod acruxhub_launchpad {
@@ -69,14 +73,51 @@ pub mod acruxhub_launchpad {
         Ok(())
     }
 
+    /// Approves (or updates, or disables) a quote token creators can pair a coin
+    /// with, with curve parameters in that token's units.
+    pub fn set_pair(ctx: Context<SetPair>, params: ConfigParams, enabled: bool) -> Result<()> {
+        params.validate()?;
+        let pair = &mut ctx.accounts.pair;
+        pair.mint = ctx.accounts.quote_mint.key();
+        pair.params = params;
+        pair.enabled = enabled;
+        pair.bump = ctx.bumps.pair;
+        emit!(PairSet { mint: pair.mint, enabled });
+        Ok(())
+    }
+
+    /// Emergency switch: while paused, no new launches, buys, sells or graduations.
+    pub fn set_paused(ctx: Context<SetPaused>, paused: bool) -> Result<()> {
+        let p = &mut ctx.accounts.pause;
+        p.paused = paused;
+        p.bump = ctx.bumps.pause;
+        emit!(PauseSet { paused });
+        Ok(())
+    }
+
     /// Creates a token and its curve. The creator gets nothing up front; buying is
     /// the only way to hold the token, on the same terms for everyone.
     pub fn create_launch(ctx: Context<CreateLaunch>, name: String, symbol: String, uri: String) -> Result<()> {
         require!(!name.is_empty() && name.len() <= 32, LaunchError::BadMetadata);
         require!(!symbol.is_empty() && symbol.len() <= 10, LaunchError::BadMetadata);
         require!(uri.len() <= 200, LaunchError::BadMetadata);
+        check_not_paused(&ctx.accounts.pause)?;
+        let quote = ctx.accounts.quote_mint.key();
+        // Paired with an approved token, on its parameters; otherwise the default quote.
+        let p = match &ctx.accounts.quote_pair {
+            Some(pair) => {
+                let expected = Pubkey::create_program_address(&[PAIR_SEED, quote.as_ref(), &[pair.bump]], &crate::ID)
+                    .map_err(|_| error!(LaunchError::PairNotAllowed))?;
+                require_keys_eq!(pair.key(), expected, LaunchError::PairNotAllowed);
+                require!(pair.enabled && pair.mint == quote, LaunchError::PairNotAllowed);
+                pair.params.clone()
+            }
+            None => {
+                require_keys_eq!(quote, ctx.accounts.config.quote_mint, LaunchError::PairNotAllowed);
+                ctx.accounts.config.params.clone()
+            }
+        };
         let config = &mut ctx.accounts.config;
-        let p = config.params.clone();
         let index = config.launch_count;
         config.launch_count += 1;
 
@@ -136,6 +177,7 @@ pub mod acruxhub_launchpad {
     /// Spends up to `quote_in` (fee included) for at least `min_tokens_out`. The buy
     /// that crosses the graduation threshold is clipped and pays only for what it gets.
     pub fn buy(ctx: Context<Trade>, quote_in: u64, min_tokens_out: u64) -> Result<()> {
+        check_not_paused(&ctx.accounts.pause)?;
         require!(!ctx.accounts.launch.complete, LaunchError::Complete);
         let q = curve::buy(&ctx.accounts.launch.state(), quote_in)?;
         require!(q.tokens_out >= min_tokens_out && q.tokens_out > 0, LaunchError::Slippage);
@@ -168,6 +210,7 @@ pub mod acruxhub_launchpad {
 
     /// Sells exactly `tokens_in` for at least `min_quote_out` (after the fee).
     pub fn sell(ctx: Context<Trade>, tokens_in: u64, min_quote_out: u64) -> Result<()> {
+        check_not_paused(&ctx.accounts.pause)?;
         require!(!ctx.accounts.launch.complete, LaunchError::Complete);
         let q = curve::sell(&ctx.accounts.launch.state(), tokens_in)?;
         require!(q.quote_to_user >= min_quote_out && q.quote_to_user > 0, LaunchError::Slippage);
@@ -197,6 +240,7 @@ pub mod acruxhub_launchpad {
     /// Permissionless once the curve is complete: creates the AMM pool at the
     /// curve's final price, deposits, burns the LP tokens and the leftover tokens.
     pub fn graduate(ctx: Context<Graduate>) -> Result<()> {
+        check_not_paused(&ctx.accounts.pause)?;
         let launch = &ctx.accounts.launch;
         require!(launch.complete && !launch.graduated, LaunchError::NotComplete);
 
@@ -296,6 +340,7 @@ pub mod acruxhub_launchpad {
     /// rent; the graduator PDA signs as the pool creator, burns all the LP and
     /// refunds every other lamport to the caller.
     pub fn graduate_raydium(ctx: Context<GraduateRaydium>) -> Result<()> {
+        check_not_paused(&ctx.accounts.pause)?;
         let launch = &ctx.accounts.launch;
         require!(launch.complete && !launch.graduated, LaunchError::NotComplete);
 
@@ -423,6 +468,18 @@ pub mod acruxhub_launchpad {
     }
 }
 
+/// The pause account is optional on chain: until an admin first sets it, it doesn't
+/// exist and nothing is paused. Once it exists it must be this program's Pause.
+fn check_not_paused(pause: &AccountInfo) -> Result<()> {
+    if pause.data_is_empty() {
+        return Ok(());
+    }
+    require_keys_eq!(*pause.owner, crate::ID, LaunchError::Unauthorized);
+    let p = Pause::try_deserialize(&mut &pause.try_borrow_data()?[..])?;
+    require!(!p.paused, LaunchError::Paused);
+    Ok(())
+}
+
 fn token_balance(info: &AccountInfo) -> Result<u64> {
     let data = info.try_borrow_data()?;
     Ok(TokenAccount::try_deserialize(&mut &data[..])?.amount)
@@ -480,6 +537,22 @@ pub struct Config {
     pub quote_mint: Pubkey,
     pub params: ConfigParams,
     pub launch_count: u64,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct QuotePair {
+    pub mint: Pubkey,
+    pub params: ConfigParams,
+    pub enabled: bool,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct Pause {
+    pub paused: bool,
     pub bump: u8,
 }
 
@@ -552,6 +625,29 @@ pub struct UpdateConfig<'info> {
 }
 
 #[derive(Accounts)]
+pub struct SetPair<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ LaunchError::Unauthorized)]
+    pub config: Account<'info, Config>,
+    pub quote_mint: Account<'info, Mint>,
+    #[account(init_if_needed, payer = admin, space = 8 + QuotePair::INIT_SPACE, seeds = [PAIR_SEED, quote_mint.key().as_ref()], bump)]
+    pub pair: Account<'info, QuotePair>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SetPaused<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ LaunchError::Unauthorized)]
+    pub config: Account<'info, Config>,
+    #[account(init_if_needed, payer = admin, space = 8 + Pause::INIT_SPACE, seeds = [PAUSE_SEED], bump)]
+    pub pause: Account<'info, Pause>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct SetQuote<'info> {
     pub admin: Signer<'info>,
     #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ LaunchError::Unauthorized)]
@@ -565,6 +661,9 @@ pub struct CreateLaunch<'info> {
     pub creator: Signer<'info>,
     #[account(mut, seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Box<Account<'info, Config>>,
+    /// CHECK: the pause switch PDA; read by check_not_paused (may not exist yet).
+    #[account(seeds = [PAUSE_SEED], bump)]
+    pub pause: UncheckedAccount<'info>,
     /// A fresh keypair the client generates, so every launch has its own address.
     #[account(init, payer = creator, mint::decimals = TOKEN_DECIMALS, mint::authority = launch)]
     pub mint: Box<Account<'info, Mint>>,
@@ -572,10 +671,14 @@ pub struct CreateLaunch<'info> {
     pub launch: Box<Account<'info, Launch>>,
     #[account(init, payer = creator, associated_token::mint = mint, associated_token::authority = launch)]
     pub curve_tokens: Box<Account<'info, TokenAccount>>,
-    #[account(address = config.quote_mint)]
+    /// The default quote (config.quote_mint), or an approved pair's token.
     pub quote_mint: Box<Account<'info, Mint>>,
     #[account(init, payer = creator, associated_token::mint = quote_mint, associated_token::authority = launch)]
     pub curve_quote: Box<Account<'info, TokenAccount>>,
+    /// Present to pair the coin with an approved token other than the default.
+    /// Its address is checked in create_launch (no seeds here, so clients that
+    /// leave it out get None rather than an auto-filled, nonexistent PDA).
+    pub quote_pair: Option<Box<Account<'info, QuotePair>>>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -587,6 +690,9 @@ pub struct Trade<'info> {
     pub user: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Box<Account<'info, Config>>,
+    /// CHECK: the pause switch PDA; read by check_not_paused (may not exist yet).
+    #[account(seeds = [PAUSE_SEED], bump)]
+    pub pause: UncheckedAccount<'info>,
     #[account(mut, seeds = [LAUNCH_SEED, launch.mint.as_ref()], bump = launch.bump, has_one = curve_tokens, has_one = curve_quote)]
     pub launch: Box<Account<'info, Launch>>,
     #[account(address = launch.mint)]
@@ -616,6 +722,9 @@ pub struct Graduate<'info> {
     pub payer: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Box<Account<'info, Config>>,
+    /// CHECK: the pause switch PDA; read by check_not_paused (may not exist yet).
+    #[account(seeds = [PAUSE_SEED], bump)]
+    pub pause: UncheckedAccount<'info>,
     #[account(mut, seeds = [LAUNCH_SEED, launch.mint.as_ref()], bump = launch.bump, has_one = curve_tokens, has_one = curve_quote)]
     pub launch: Box<Account<'info, Launch>>,
     #[account(mut, address = launch.mint)]
@@ -656,6 +765,9 @@ pub struct GraduateRaydium<'info> {
     pub payer: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump)]
     pub config: Box<Account<'info, Config>>,
+    /// CHECK: the pause switch PDA; read by check_not_paused (may not exist yet).
+    #[account(seeds = [PAUSE_SEED], bump)]
+    pub pause: UncheckedAccount<'info>,
     #[account(mut, seeds = [LAUNCH_SEED, launch.mint.as_ref()], bump = launch.bump, has_one = curve_tokens, has_one = curve_quote)]
     pub launch: Box<Account<'info, Launch>>,
     #[account(mut, address = launch.mint)]
@@ -719,6 +831,17 @@ pub struct GraduatedRaydium {
     pub lp_burned: u64,
     pub tokens_burned: u64,
     pub create_pool_fee: u64,
+}
+
+#[event]
+pub struct PairSet {
+    pub mint: Pubkey,
+    pub enabled: bool,
+}
+
+#[event]
+pub struct PauseSet {
+    pub paused: bool,
 }
 
 #[event]
@@ -786,4 +909,8 @@ pub enum LaunchError {
     Overflow,
     #[msg("Not a usable Raydium fee tier (creation disabled or trade fee over 1%)")]
     BadFeeTier,
+    #[msg("The launchpad is paused")]
+    Paused,
+    #[msg("That quote token isn't an approved pair")]
+    PairNotAllowed,
 }

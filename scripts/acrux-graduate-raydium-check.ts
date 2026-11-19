@@ -61,7 +61,7 @@ const curveTokens = getAssociatedTokenAddressSync(mint.publicKey, launch, true)
 const curveQuote = getAssociatedTokenAddressSync(quoteMint, launch, true)
 const created = await send(new Transaction().add(
   ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-  await lp.methods.createLaunch(process.argv.includes('--complete-only') ? 'Graduation Test 2' : 'Graduation Test', process.argv.includes('--complete-only') ? 'GRAD2' : 'GRADT', 'https://acruxhub.com').accountsPartial({ creator: kp.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint }).instruction(),
+  await lp.methods.createLaunch(process.argv.includes('--complete-only') ? 'Graduation Test 2' : 'Graduation Test', process.argv.includes('--complete-only') ? 'GRAD2' : 'GRADT', 'https://acruxhub.com').accountsPartial({ creator: kp.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint, quotePair: null }).instruction(),
   createAssociatedTokenAccountIdempotentInstruction(kp.publicKey, getAssociatedTokenAddressSync(quoteMint, fee, true), fee, quoteMint),
   await lp.methods.buy(new BN(buyRaw.toString()), new BN(q.tokensOut.toString())).accountsPartial({
     user: kp.publicKey, launch, mint: mint.publicKey, quoteMint, curveTokens, curveQuote,

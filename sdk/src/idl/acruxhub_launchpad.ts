@@ -53,6 +53,23 @@ export type AcruxhubLaunchpad = {
           }
         },
         {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "launch",
           "writable": true,
           "pda": {
@@ -351,6 +368,23 @@ export type AcruxhubLaunchpad = {
           }
         },
         {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "mint",
           "docs": [
             "A fresh keypair the client generates, so every launch has its own address."
@@ -472,7 +506,10 @@ export type AcruxhubLaunchpad = {
           }
         },
         {
-          "name": "quoteMint"
+          "name": "quoteMint",
+          "docs": [
+            "The default quote (config.quote_mint), or an approved pair's token."
+          ]
         },
         {
           "name": "curveQuote",
@@ -565,6 +602,15 @@ export type AcruxhubLaunchpad = {
           }
         },
         {
+          "name": "quotePair",
+          "docs": [
+            "Present to pair the coin with an approved token other than the default.",
+            "Its address is checked in create_launch (no seeds here, so clients that",
+            "leave it out get None rather than an auto-filled, nonexistent PDA)."
+          ],
+          "optional": true
+        },
+        {
           "name": "tokenProgram",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -630,6 +676,23 @@ export type AcruxhubLaunchpad = {
                   102,
                   105,
                   103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
                 ]
               }
             ]
@@ -767,6 +830,23 @@ export type AcruxhubLaunchpad = {
                   102,
                   105,
                   103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
                 ]
               }
             ]
@@ -1193,6 +1273,23 @@ export type AcruxhubLaunchpad = {
           }
         },
         {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "launch",
           "writable": true,
           "pda": {
@@ -1450,6 +1547,165 @@ export type AcruxhubLaunchpad = {
       ]
     },
     {
+      "name": "setPair",
+      "docs": [
+        "Approves (or updates, or disables) a quote token creators can pair a coin",
+        "with, with curve parameters in that token's units."
+      ],
+      "discriminator": [
+        42,
+        150,
+        180,
+        126,
+        54,
+        219,
+        46,
+        191
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "quoteMint"
+        },
+        {
+          "name": "pair",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  105,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quoteMint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "configParams"
+            }
+          }
+        },
+        {
+          "name": "enabled",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "setPaused",
+      "docs": [
+        "Emergency switch: while paused, no new launches, buys, sells or graduations."
+      ],
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pause",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
       "name": "setQuote",
       "docs": [
         "Switches the quote token for future launches, with curve parameters in",
@@ -1592,6 +1848,32 @@ export type AcruxhubLaunchpad = {
         213,
         38
       ]
+    },
+    {
+      "name": "pause",
+      "discriminator": [
+        168,
+        183,
+        252,
+        225,
+        28,
+        17,
+        138,
+        174
+      ]
+    },
+    {
+      "name": "quotePair",
+      "discriminator": [
+        176,
+        165,
+        22,
+        206,
+        194,
+        43,
+        198,
+        82
+      ]
     }
   ],
   "events": [
@@ -1645,6 +1927,32 @@ export type AcruxhubLaunchpad = {
         34,
         89,
         20
+      ]
+    },
+    {
+      "name": "pairSet",
+      "discriminator": [
+        131,
+        21,
+        92,
+        19,
+        59,
+        20,
+        80,
+        231
+      ]
+    },
+    {
+      "name": "pauseSet",
+      "discriminator": [
+        175,
+        57,
+        198,
+        136,
+        192,
+        66,
+        204,
+        73
       ]
     },
     {
@@ -1719,6 +2027,16 @@ export type AcruxhubLaunchpad = {
       "code": 6008,
       "name": "badFeeTier",
       "msg": "Not a usable Raydium fee tier (creation disabled or trade fee over 1%)"
+    },
+    {
+      "code": 6009,
+      "name": "paused",
+      "msg": "The launchpad is paused"
+    },
+    {
+      "code": 6010,
+      "name": "pairNotAllowed",
+      "msg": "That quote token isn't an approved pair"
     }
   ],
   "types": [
@@ -2014,6 +2332,50 @@ export type AcruxhubLaunchpad = {
       }
     },
     {
+      "name": "pairSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "pause",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "pauseSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
       "name": "quoteChanged",
       "type": {
         "kind": "struct",
@@ -2025,6 +2387,34 @@ export type AcruxhubLaunchpad = {
           {
             "name": "new",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quotePair",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "configParams"
+              }
+            }
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

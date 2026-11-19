@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Keypair, ComputeBudgetProgram, PublicKey } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token'
 import {
-  launchpadProgram, launchConfig, launchAddress, allAccounts, curveBuy, curveSell, curvePrice, curveProgress, stateOf, graduateAccounts, BN,
+  launchpadProgram, launchConfig, launchAddress, launchPairAddress, launchPauseAddress, allAccounts, curveBuy, curveSell, curvePrice, curveProgress, stateOf, graduateAccounts, BN,
   graduateRaydiumAccounts, loadCpmmFeeTiers, cpmmPoolAddresses, CPMM_POOL_SIZE, RAYDIUM_CPMM_ID,
   type CurveState,
 } from '@acruxhub/sdk'
@@ -57,27 +57,45 @@ export function Launch() {
   const quoteMint = config.data.quoteMint
   const quoteSym = tokenLabel(quoteMint.toBase58())
   const qd = quoteDecimals.data ?? 9
+  // Quote tokens a new coin can be paired with: the default, then the admin's approved pairs.
+  const pairs = useAsync(async () => {
+    if (!config.data) return []
+    const lp = launchpadProgram(readProvider(w.conn))
+    const approved = ((await allAccounts<any>(lp, 'QuotePair').catch(() => [])) as any[]).filter(p => p.account.enabled)
+    const base = [{ mint: config.data.quoteMint as PublicKey, params: config.data.params, isDefault: true }]
+    const extra = approved
+      .filter(p => !(p.account.mint as PublicKey).equals(config.data!.quoteMint))
+      .map(p => ({ mint: p.account.mint as PublicKey, params: p.account.params, isDefault: false }))
+    return Promise.all([...base, ...extra].map(async p => ({ ...p, sym: tokenLabel(p.mint.toBase58()), decimals: await decimalsOf(w.conn, p.mint) })))
+  }, [config.data, w.conn])
+  // The admin's emergency pause (see set_paused): blocks launches, trades and graduations.
+  const paused = useAsync(async () => {
+    const lp = launchpadProgram(readProvider(w.conn))
+    const p: any = await (lp.account as any).pause.fetchNullable(launchPauseAddress()).catch(() => null)
+    return !!p?.paused
+  }, [w.conn, w.refreshKey])
   const quoteOf = (l: LaunchRow) => {
     const q = launchQuotes.data?.get(l.publicKey.toBase58())
     return q ? { quoteMint: q.mint, quoteSym: tokenLabel(q.mint.toBase58()), qd: q.decimals } : { quoteMint, quoteSym, qd }
   }
 
-  if (view.kind === 'create' && !LAUNCHES_PAUSED) {
-    return <Create quoteSym={quoteSym} qd={qd} params={config.data.params} quoteMint={quoteMint} onDone={key => setView(key ? { kind: 'coin', key } : { kind: 'list' })} />
+  const pausedNote = paused.data ? 'The launchpad is paused for now: no new coins, buys, sells or graduations. Funds stay where they are.' : LAUNCHES_PAUSED
+  if (view.kind === 'create' && !pausedNote && pairs.data?.length) {
+    return <Create pairs={pairs.data} onDone={key => setView(key ? { kind: 'coin', key } : { kind: 'list' })} />
   }
   if (view.kind === 'coin') {
     const l = launches.data?.find(x => x.publicKey.toBase58() === view.key)
     if (!l) return <div className="card narrow">{launches.loading ? 'Loading…' : <Empty>Coin not found.</Empty>}<button onClick={() => setView({ kind: 'list' })}>← Back</button></div>
     if (!launchQuotes.data) return <div className="card narrow">Loading…</div>
-    return <Coin l={l} {...quoteOf(l)} onBack={() => setView({ kind: 'list' })} />
+    return <Coin l={l} {...quoteOf(l)} paused={!!paused.data} onBack={() => setView({ kind: 'list' })} />
   }
 
   return (
     <>
-      {LAUNCHES_PAUSED ? (
+      {pausedNote ? (
         <div className="card notice" role="status" style={{ marginBottom: 16 }}>
-          <strong>Launches paused</strong>
-          <p style={{ margin: '6px 0 0' }}>{LAUNCHES_PAUSED}</p>
+          <strong>{paused.data ? 'Launchpad paused' : 'Launches paused'}</strong>
+          <p style={{ margin: '6px 0 0' }}>{pausedNote}</p>
         </div>
       ) : (
         <div className="launch-hero">
@@ -147,8 +165,13 @@ function freshCurve(params: any): CurveState {
   }
 }
 
-function Create({ quoteSym, qd, params, quoteMint, onDone }: { quoteSym: string; qd: number; params: any; quoteMint: PublicKey; onDone: (key?: string) => void }) {
+type Pair = { mint: PublicKey; params: any; isDefault: boolean; sym: string; decimals: number }
+
+function Create({ pairs, onDone }: { pairs: Pair[]; onDone: (key?: string) => void }) {
   const w = useWallet()
+  const [pairIdx, setPairIdx] = useState(0)
+  const pair = pairs[Math.min(pairIdx, pairs.length - 1)]
+  const { mint: quoteMint, params, sym: quoteSym, decimals: qd } = pair
   const [name, setName] = useState('')
   const [symbol, setSymbol] = useState('')
   const [description, setDescription] = useState('')
@@ -205,6 +228,16 @@ function Create({ quoteSym, qd, params, quoteMint, onDone }: { quoteSym: string;
         </>
       )}
 
+      {pairs.length > 1 && (
+        <div className="field">
+          <label>Pair with</label>
+          <select value={String(pairIdx)} onChange={e => { setPairIdx(Number(e.target.value)); setFirstBuy('') }}>
+            {pairs.map((p, i) => <option key={p.mint.toBase58()} value={String(i)}>{p.sym}{p.isDefault ? ' (default)' : ''}</option>)}
+          </select>
+          <small>Your coin's curve, and its pool after graduation, trade against this token. You can't change it later.</small>
+        </div>
+      )}
+
       <div className="field">
         <label>Buy at launch (optional, {quoteSym})</label>
         <input inputMode="decimal" value={firstBuy} onChange={e => setFirstBuy(e.target.value)} placeholder="0" />
@@ -226,7 +259,7 @@ function Create({ quoteSym, qd, params, quoteMint, onDone }: { quoteSym: string;
           const mint = Keypair.generate()
           const launch = launchAddress(mint.publicKey)
           const create = await lp.methods.createLaunch(name, symbol, uri)
-            .accountsPartial({ creator: w.publicKey!, config: launchConfig(), mint: mint.publicKey, quoteMint })
+            .accountsPartial({ creator: w.publicKey!, config: launchConfig(), mint: mint.publicKey, quoteMint, quotePair: pair.isDefault ? null : launchPairAddress(quoteMint) })
             .instruction()
           const feeRecipient = params.feeRecipient as PublicKey
           const post = buyQuote
@@ -259,7 +292,7 @@ function Create({ quoteSym, qd, params, quoteMint, onDone }: { quoteSym: string;
   )
 }
 
-function Coin({ l, quoteMint, quoteSym, qd, onBack }: { l: LaunchRow; quoteMint: PublicKey; quoteSym: string; qd: number; onBack: () => void }) {
+function Coin({ l, quoteMint, quoteSym, qd, paused, onBack }: { l: LaunchRow; quoteMint: PublicKey; quoteSym: string; qd: number; paused: boolean; onBack: () => void }) {
   const w = useWallet()
   const a = l.account
   const s = stateOf(a)
@@ -311,7 +344,7 @@ function Coin({ l, quoteMint, quoteSym, qd, onBack }: { l: LaunchRow; quoteMint:
         {a.graduated ? (
           <GraduatedNote pool={a.pool} mint={a.mint} />
         ) : a.complete ? (
-          <GraduatePanel a={a} quoteMint={quoteMint} />
+          <GraduatePanel a={a} quoteMint={quoteMint} paused={paused} />
         ) : (
           <>
             <div className="row" style={{ marginBottom: 10 }}>
@@ -326,7 +359,7 @@ function Coin({ l, quoteMint, quoteSym, qd, onBack }: { l: LaunchRow; quoteMint:
             {q && 'quoteOut' in q && <p className="muted">≈ {fmt(q.quoteOut, qd)} {quoteSym} after fee</p>}
             <Action
               label={side === 'buy' ? 'Buy' : 'Sell'}
-              disabled={!w.publicKey || !q}
+              disabled={!w.publicKey || !q || paused}
               run={async () => {
                 const lp = launchpadProgram(w.provider!)
                 const tx = side === 'buy'
@@ -360,7 +393,7 @@ function GraduatedNote({ pool, mint }: { pool: PublicKey; mint: PublicKey }) {
 }
 
 /** A completed curve can graduate into either venue, once. */
-function GraduatePanel({ a, quoteMint }: { a: any; quoteMint: PublicKey }) {
+function GraduatePanel({ a, quoteMint, paused }: { a: any; quoteMint: PublicKey; paused: boolean }) {
   const w = useWallet()
   const [venue, setVenue] = useState<'raydium' | 'acruxhub'>('raydium')
   const tiers = useAsync(() => loadCpmmFeeTiers(w.conn), [w.conn])
@@ -409,7 +442,7 @@ function GraduatePanel({ a, quoteMint }: { a: any; quoteMint: PublicKey }) {
           <p className="muted" style={{ fontSize: 13 }}>Raydium pools use Raydium's own program, so Raydium-compatible tools can trade the coin too. About 16% of a Raydium pool's trading fee goes to Raydium.</p>
           <Action
             label="Graduate to Raydium"
-            disabled={!w.publicKey || !tier || !!taken.data || short_}
+            disabled={!w.publicKey || !tier || !!taken.data || short_ || paused}
             run={async () => {
               const lp = launchpadProgram(w.provider!)
               const tx = await lp.methods.graduateRaydium()
@@ -427,7 +460,7 @@ function GraduatePanel({ a, quoteMint }: { a: any; quoteMint: PublicKey }) {
           <p className="muted" style={{ fontSize: 13 }}>An AcruxHub AMM pool with a 0.30% fee. You pay only the pool's rent, and every trading fee stays in the pool.</p>
           <Action
             label="Graduate to AcruxHub DEX"
-            disabled={!w.publicKey}
+            disabled={!w.publicKey || paused}
             run={async () => {
               const lp = launchpadProgram(w.provider!)
               const tx = await lp.methods.graduate()

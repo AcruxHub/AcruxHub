@@ -47,6 +47,23 @@
           }
         },
         {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "launch",
           "writable": true,
           "pda": {
@@ -345,6 +362,23 @@
           }
         },
         {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "mint",
           "docs": [
             "A fresh keypair the client generates, so every launch has its own address."
@@ -466,7 +500,10 @@
           }
         },
         {
-          "name": "quote_mint"
+          "name": "quote_mint",
+          "docs": [
+            "The default quote (config.quote_mint), or an approved pair's token."
+          ]
         },
         {
           "name": "curve_quote",
@@ -559,6 +596,15 @@
           }
         },
         {
+          "name": "quote_pair",
+          "docs": [
+            "Present to pair the coin with an approved token other than the default.",
+            "Its address is checked in create_launch (no seeds here, so clients that",
+            "leave it out get None rather than an auto-filled, nonexistent PDA)."
+          ],
+          "optional": true
+        },
+        {
           "name": "token_program",
           "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
         },
@@ -624,6 +670,23 @@
                   102,
                   105,
                   103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
                 ]
               }
             ]
@@ -761,6 +824,23 @@
                   102,
                   105,
                   103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
                 ]
               }
             ]
@@ -1187,6 +1267,23 @@
           }
         },
         {
+          "name": "pause",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
           "name": "launch",
           "writable": true,
           "pda": {
@@ -1444,6 +1541,165 @@
       ]
     },
     {
+      "name": "set_pair",
+      "docs": [
+        "Approves (or updates, or disables) a quote token creators can pair a coin",
+        "with, with curve parameters in that token's units."
+      ],
+      "discriminator": [
+        42,
+        150,
+        180,
+        126,
+        54,
+        219,
+        46,
+        191
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "pair",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  105,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "ConfigParams"
+            }
+          }
+        },
+        {
+          "name": "enabled",
+          "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "set_paused",
+      "docs": [
+        "Emergency switch: while paused, no new launches, buys, sells or graduations."
+      ],
+      "discriminator": [
+        91,
+        60,
+        125,
+        192,
+        176,
+        225,
+        166,
+        218
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "pause",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  117,
+                  115,
+                  101
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "paused",
+          "type": "bool"
+        }
+      ]
+    },
+    {
       "name": "set_quote",
       "docs": [
         "Switches the quote token for future launches, with curve parameters in",
@@ -1586,6 +1842,32 @@
         213,
         38
       ]
+    },
+    {
+      "name": "Pause",
+      "discriminator": [
+        168,
+        183,
+        252,
+        225,
+        28,
+        17,
+        138,
+        174
+      ]
+    },
+    {
+      "name": "QuotePair",
+      "discriminator": [
+        176,
+        165,
+        22,
+        206,
+        194,
+        43,
+        198,
+        82
+      ]
     }
   ],
   "events": [
@@ -1639,6 +1921,32 @@
         34,
         89,
         20
+      ]
+    },
+    {
+      "name": "PairSet",
+      "discriminator": [
+        131,
+        21,
+        92,
+        19,
+        59,
+        20,
+        80,
+        231
+      ]
+    },
+    {
+      "name": "PauseSet",
+      "discriminator": [
+        175,
+        57,
+        198,
+        136,
+        192,
+        66,
+        204,
+        73
       ]
     },
     {
@@ -1713,6 +2021,16 @@
       "code": 6008,
       "name": "BadFeeTier",
       "msg": "Not a usable Raydium fee tier (creation disabled or trade fee over 1%)"
+    },
+    {
+      "code": 6009,
+      "name": "Paused",
+      "msg": "The launchpad is paused"
+    },
+    {
+      "code": 6010,
+      "name": "PairNotAllowed",
+      "msg": "That quote token isn't an approved pair"
     }
   ],
   "types": [
@@ -2008,6 +2326,50 @@
       }
     },
     {
+      "name": "PairSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Pause",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "paused",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "PauseSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "paused",
+            "type": "bool"
+          }
+        ]
+      }
+    },
+    {
       "name": "QuoteChanged",
       "type": {
         "kind": "struct",
@@ -2019,6 +2381,34 @@
           {
             "name": "new",
             "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuotePair",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "params",
+            "type": {
+              "defined": {
+                "name": "ConfigParams"
+              }
+            }
+          },
+          {
+            "name": "enabled",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
           }
         ]
       }

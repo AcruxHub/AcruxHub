@@ -95,6 +95,10 @@ export function isqrt(n: bigint): bigint {
 
 export const launchConfig = () => pda([enc('config')], LAUNCHPAD_ID)
 export const launchAddress = (mint: PublicKey) => pda([enc('launch'), mint.toBytes()], LAUNCHPAD_ID)
+/** An approved quote token creators can pair a coin with (set by the admin with set_pair). */
+export const launchPairAddress = (quoteMint: PublicKey) => pda([enc('pair'), quoteMint.toBytes()], LAUNCHPAD_ID)
+/** The launchpad's emergency pause switch (absent until first set = not paused). */
+export const launchPauseAddress = () => pda([enc('pause')], LAUNCHPAD_ID)
 
 export type CurveState = { virtualQuote: bigint; virtualTokens: bigint; realQuote: bigint; realTokens: bigint; graduationQuote: bigint; feeBps: number }
 
