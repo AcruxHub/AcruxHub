@@ -720,6 +720,361 @@ export type AcruxhubLaunchpad = {
       "args": []
     },
     {
+      "name": "graduateRaydium",
+      "docs": [
+        "Same as `graduate`, into a Raydium CPMM pool on the caller's chosen fee tier",
+        "(trade fee at most 1%). The caller pays Raydium's creation fee and the pool's",
+        "rent; the graduator PDA signs as the pool creator, burns all the LP and",
+        "refunds every other lamport to the caller."
+      ],
+      "discriminator": [
+        168,
+        26,
+        104,
+        54,
+        10,
+        108,
+        12,
+        163
+      ],
+      "accounts": [
+        {
+          "name": "payer",
+          "docs": [
+            "Anyone: pays Raydium's pool-creation fee and the pool's rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "launch",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  108,
+                  97,
+                  117,
+                  110,
+                  99,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "tokenMint",
+          "writable": true
+        },
+        {
+          "name": "quoteMint"
+        },
+        {
+          "name": "curveTokens",
+          "writable": true,
+          "relations": [
+            "launch"
+          ]
+        },
+        {
+          "name": "curveQuote",
+          "writable": true,
+          "relations": [
+            "launch"
+          ]
+        },
+        {
+          "name": "graduator",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  103,
+                  114,
+                  97,
+                  100,
+                  117,
+                  97,
+                  116,
+                  111,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "launch.mint",
+                "account": "launch"
+              }
+            ]
+          }
+        },
+        {
+          "name": "graduatorTokens",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "graduator"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "tokenMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "graduatorQuote",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "graduator"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "quoteMint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "graduatorLp",
+          "writable": true
+        },
+        {
+          "name": "ammConfig"
+        },
+        {
+          "name": "cpmmAuthority"
+        },
+        {
+          "name": "poolState",
+          "writable": true
+        },
+        {
+          "name": "lpMint",
+          "writable": true
+        },
+        {
+          "name": "vault0",
+          "writable": true
+        },
+        {
+          "name": "vault1",
+          "writable": true
+        },
+        {
+          "name": "createPoolFee",
+          "writable": true,
+          "address": "DNXgeM9EiiaAbaWvwjHj9fQQLAX5ZsfHyvmYUNRAdNC8"
+        },
+        {
+          "name": "observation",
+          "writable": true
+        },
+        {
+          "name": "cpmmProgram",
+          "address": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C"
+        },
+        {
+          "name": "tokenProgram",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associatedTokenProgram",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
       "name": "initialize",
       "docs": [
         "One-time setup, gated on the program's upgrade authority so nobody can",
@@ -1180,6 +1535,19 @@ export type AcruxhubLaunchpad = {
       ]
     },
     {
+      "name": "graduatedRaydium",
+      "discriminator": [
+        177,
+        137,
+        104,
+        192,
+        253,
+        197,
+        159,
+        134
+      ]
+    },
+    {
       "name": "launchComplete",
       "discriminator": [
         187,
@@ -1259,6 +1627,11 @@ export type AcruxhubLaunchpad = {
       "code": 6007,
       "name": "overflow",
       "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6008,
+      "name": "badFeeTier",
+      "msg": "Not a usable Raydium fee tier (creation disabled or trade fee over 1%)"
     }
   ],
   "types": [
@@ -1364,6 +1737,50 @@ export type AcruxhubLaunchpad = {
           },
           {
             "name": "tokensBurned",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "graduatedRaydium",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "launch",
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "pool",
+            "type": "pubkey"
+          },
+          {
+            "name": "ammConfig",
+            "type": "pubkey"
+          },
+          {
+            "name": "tokens",
+            "type": "u64"
+          },
+          {
+            "name": "quote",
+            "type": "u64"
+          },
+          {
+            "name": "lpBurned",
+            "type": "u64"
+          },
+          {
+            "name": "tokensBurned",
+            "type": "u64"
+          },
+          {
+            "name": "createPoolFee",
             "type": "u64"
           }
         ]

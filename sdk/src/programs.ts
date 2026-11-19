@@ -12,6 +12,7 @@ import type { AcruxhubAmm } from './idl/acruxhub_amm.ts'
 import type { AcruxhubLaunchpad } from './idl/acruxhub_launchpad.ts'
 import type { AcruxhubBridge } from './idl/acruxhub_bridge.ts'
 import { sha256 } from '@noble/hashes/sha256'
+import { cpmmPoolAddresses, RAYDIUM_CPMM_AUTHORITY, RAYDIUM_CPMM_CREATE_FEE_RECEIVER, RAYDIUM_CPMM_ID } from './raydium.ts'
 
 export type { AcruxhubAmm, AcruxhubLaunchpad, AcruxhubBridge }
 export const AMM_ID = new PublicKey(ammIdl.address)
@@ -153,6 +154,39 @@ export function graduateAccounts(launch: { mint: PublicKey; curveTokens: PublicK
     vaultB: p.vaultB,
     lpMint: p.lpMint,
     launchLp: getAssociatedTokenAddressSync(p.lpMint, launchKey, true),
+  }
+}
+
+/** System-owned PDA that signs as the Raydium pool creator during `graduate_raydium`. */
+export const graduatorAddress = (mint: PublicKey) => pda([enc('graduator'), mint.toBytes()], LAUNCHPAD_ID)
+
+/**
+ * All accounts `graduate_raydium` needs: the launch's coin paired with the quote
+ * mint in a Raydium CPMM pool on fee tier `ammConfig` (trade fee at most 1%).
+ * It uses about 180k compute units; send it with a limit of 300k or more.
+ */
+export function graduateRaydiumAccounts(launch: { mint: PublicKey; curveTokens: PublicKey; curveQuote: PublicKey }, quoteMint: PublicKey, ammConfig: PublicKey) {
+  const graduator = graduatorAddress(launch.mint)
+  const p = cpmmPoolAddresses(ammConfig, launch.mint, quoteMint)
+  return {
+    launch: launchAddress(launch.mint),
+    tokenMint: launch.mint,
+    quoteMint,
+    curveTokens: launch.curveTokens,
+    curveQuote: launch.curveQuote,
+    graduator,
+    graduatorTokens: getAssociatedTokenAddressSync(launch.mint, graduator, true),
+    graduatorQuote: getAssociatedTokenAddressSync(quoteMint, graduator, true),
+    graduatorLp: getAssociatedTokenAddressSync(p.lpMint, graduator, true),
+    ammConfig,
+    cpmmAuthority: RAYDIUM_CPMM_AUTHORITY,
+    poolState: p.pool,
+    lpMint: p.lpMint,
+    vault0: p.vault0,
+    vault1: p.vault1,
+    createPoolFee: RAYDIUM_CPMM_CREATE_FEE_RECEIVER,
+    observation: p.observation,
+    cpmmProgram: RAYDIUM_CPMM_ID,
   }
 }
 

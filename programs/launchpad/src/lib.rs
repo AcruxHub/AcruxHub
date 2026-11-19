@@ -5,16 +5,19 @@
 //! Net). When the real quote raised reaches the graduation threshold, anyone can
 //! call `graduate`: the raised quote and the matching tokens seed an AcruxHub AMM
 //! pool at the curve's final price, the LP tokens are burned (liquidity locked
-//! forever) and leftover tokens are burned.
+//! forever) and leftover tokens are burned. `graduate_raydium` does the same into
+//! a Raydium CPMM pool instead (see docs/dev-graduate-raydium.md).
 
 use anchor_lang::prelude::*;
+use anchor_lang::system_program;
 use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::spl_token::instruction::AuthorityType;
-use anchor_spl::token::{self, Burn, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Burn, CloseAccount, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer};
 
 use acruxhub_amm::program::AcruxhubAmm;
 
 pub mod curve;
+pub mod raydium;
 
 declare_id!("3qCdE6gNWinKpPX71JZk8DGe2AYsYaVg6v8WB7N3SKrd");
 
@@ -24,6 +27,9 @@ pub const TOKEN_DECIMALS: u8 = 6;
 pub const MAX_FEE_BPS: u16 = 500;
 /// Fee tier of graduated pools.
 pub const GRADUATED_POOL_FEE_BPS: u16 = 30;
+/// System-owned PDA (never holds data) that acts as Raydium's pool creator, so it
+/// can both sign for the deposit and pay Raydium's lamport fee and rent.
+pub const GRADUATOR_SEED: &[u8] = b"graduator";
 
 #[program]
 pub mod acruxhub_launchpad {
@@ -272,6 +278,142 @@ pub mod acruxhub_launchpad {
         emit!(Graduated { launch: launch.key(), mint: mint_key, pool: pool_key, tokens: token_amount, quote: quote_amount, lp_burned: lp, tokens_burned: burn_excess });
         Ok(())
     }
+
+    /// Same as `graduate`, into a Raydium CPMM pool on the caller's chosen fee tier
+    /// (trade fee at most 1%). The caller pays Raydium's creation fee and the pool's
+    /// rent; the graduator PDA signs as the pool creator, burns all the LP and
+    /// refunds every other lamport to the caller.
+    pub fn graduate_raydium(ctx: Context<GraduateRaydium>) -> Result<()> {
+        let launch = &ctx.accounts.launch;
+        require!(launch.complete && !launch.graduated, LaunchError::NotComplete);
+
+        let quote_amount = launch.real_quote;
+        let held = ctx.accounts.curve_tokens.amount;
+        let token_amount = curve::tokens_for_pool(&launch.state(), quote_amount)?.min(held);
+        let burn_excess = held - token_amount;
+
+        let mint_key = launch.mint;
+        let launch_bump = [launch.bump];
+        let launch_seeds: &[&[u8]] = &[LAUNCH_SEED, mint_key.as_ref(), &launch_bump];
+        let grad_bump = [ctx.bumps.graduator];
+        let grad_seeds: &[&[u8]] = &[GRADUATOR_SEED, mint_key.as_ref(), &grad_bump];
+        let grad_signer: &[&[&[u8]]] = &[grad_seeds];
+        let a = &ctx.accounts;
+        let tp = a.token_program.to_account_info();
+        let sp = a.system_program.to_account_info();
+        let graduator = a.graduator.to_account_info();
+        let payer = a.payer.to_account_info();
+
+        // 1. Fund the graduator with Raydium's fee and the rent for the pool accounts.
+        let create_fee = raydium::check_amm_config(&a.amm_config.to_account_info())?;
+        let funding = create_fee
+            .checked_add(raydium::creation_rent(&Rent::get()?) + raydium::FUNDING_MARGIN)
+            .ok_or(LaunchError::Overflow)?;
+        system_program::transfer(CpiContext::new(sp.clone(), system_program::Transfer { from: payer.clone(), to: graduator.clone() }), funding)?;
+
+        // 2. Move the deposit from the curve to the graduator.
+        let (gt, gq) = (a.graduator_tokens.to_account_info(), a.graduator_quote.to_account_info());
+        for (from, to, amount) in [(a.curve_tokens.to_account_info(), gt.clone(), token_amount), (a.curve_quote.to_account_info(), gq.clone(), quote_amount)] {
+            token::transfer(
+                CpiContext::new_with_signer(tp.clone(), Transfer { from, to, authority: a.launch.to_account_info() }, &[launch_seeds]),
+                amount,
+            )?;
+        }
+
+        // 3. Create the pool; Raydium orders the two tokens by address.
+        let token_is_0 = a.token_mint.key() < a.quote_mint.key();
+        let (tm, qm) = (a.token_mint.to_account_info(), a.quote_mint.to_account_info());
+        let (mint_0, mint_1, user_0, user_1, amount_0, amount_1) =
+            if token_is_0 { (&tm, &qm, &gt, &gq, token_amount, quote_amount) } else { (&qm, &tm, &gq, &gt, quote_amount, token_amount) };
+        let lp_info = a.graduator_lp.to_account_info();
+        raydium::initialize(
+            &raydium::InitializeAccounts {
+                creator: &graduator,
+                amm_config: &a.amm_config.to_account_info(),
+                authority: &a.cpmm_authority.to_account_info(),
+                pool_state: &a.pool_state.to_account_info(),
+                mint_0,
+                mint_1,
+                lp_mint: &a.lp_mint.to_account_info(),
+                creator_token_0: user_0,
+                creator_token_1: user_1,
+                creator_lp: &lp_info,
+                vault_0: &a.vault_0.to_account_info(),
+                vault_1: &a.vault_1.to_account_info(),
+                create_pool_fee: &a.create_pool_fee.to_account_info(),
+                observation: &a.observation.to_account_info(),
+                token_program: &tp,
+                associated_token_program: &a.associated_token_program.to_account_info(),
+                system_program: &sp,
+                rent: &a.rent.to_account_info(),
+                cpmm_program: &a.cpmm_program.to_account_info(),
+            },
+            amount_0,
+            amount_1,
+            0,
+            grad_signer,
+        )?;
+
+        // 4. Lock the liquidity: burn every LP token the graduator received.
+        let lp = token_balance(&lp_info)?;
+        token::burn(
+            CpiContext::new_with_signer(tp.clone(), Burn { mint: a.lp_mint.to_account_info(), from: lp_info.clone(), authority: graduator.clone() }, grad_signer),
+            lp,
+        )?;
+        // 5. Close the graduator's token accounts, rent back to the caller. One that
+        // someone dusted keeps its dust and rent rather than blocking graduation.
+        for acct in [lp_info, gt, gq] {
+            if token_balance(&acct)? == 0 {
+                token::close_account(CpiContext::new_with_signer(
+                    tp.clone(),
+                    CloseAccount { account: acct, destination: payer.clone(), authority: graduator.clone() },
+                    grad_signer,
+                ))?;
+            }
+        }
+        // 6. Refund the graduator's unspent lamports; it ends empty.
+        let left = graduator.lamports();
+        if left > 0 {
+            system_program::transfer(
+                CpiContext::new_with_signer(sp.clone(), system_program::Transfer { from: graduator.clone(), to: payer.clone() }, grad_signer),
+                left,
+            )?;
+        }
+        // 7. Burn the tokens the pool did not need.
+        if burn_excess > 0 {
+            token::burn(
+                CpiContext::new_with_signer(
+                    tp.clone(),
+                    Burn { mint: tm, from: a.curve_tokens.to_account_info(), authority: a.launch.to_account_info() },
+                    &[launch_seeds],
+                ),
+                burn_excess,
+            )?;
+        }
+
+        let pool_key = ctx.accounts.pool_state.key();
+        let amm_config = ctx.accounts.amm_config.key();
+        let launch = &mut ctx.accounts.launch;
+        launch.graduated = true;
+        launch.pool = pool_key;
+        emit!(GraduatedRaydium {
+            launch: launch.key(),
+            mint: mint_key,
+            pool: pool_key,
+            amm_config,
+            tokens: token_amount,
+            quote: quote_amount,
+            lp_burned: lp,
+            tokens_burned: burn_excess,
+            create_pool_fee: create_fee,
+        });
+        Ok(())
+    }
+}
+
+fn token_balance(info: &AccountInfo) -> Result<u64> {
+    let data = info.try_borrow_data()?;
+    Ok(TokenAccount::try_deserialize(&mut &data[..])?.amount)
 }
 
 fn transfer_user<'info>(a: &Trade<'info>, from: &Account<'info, TokenAccount>, to: &Account<'info, TokenAccount>, amount: u64) -> Result<()> {
@@ -485,6 +627,77 @@ pub struct Graduate<'info> {
     pub rent: Sysvar<'info, Rent>,
 }
 
+#[derive(Accounts)]
+pub struct GraduateRaydium<'info> {
+    /// Anyone: pays Raydium's pool-creation fee and the pool's rent.
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Box<Account<'info, Config>>,
+    #[account(mut, seeds = [LAUNCH_SEED, launch.mint.as_ref()], bump = launch.bump, has_one = curve_tokens, has_one = curve_quote)]
+    pub launch: Box<Account<'info, Launch>>,
+    #[account(mut, address = launch.mint)]
+    pub token_mint: Box<Account<'info, Mint>>,
+    #[account(address = config.quote_mint)]
+    pub quote_mint: Box<Account<'info, Mint>>,
+    #[account(mut)]
+    pub curve_tokens: Box<Account<'info, TokenAccount>>,
+    #[account(mut)]
+    pub curve_quote: Box<Account<'info, TokenAccount>>,
+    /// CHECK: system-owned PDA with no data; signs as Raydium's pool creator.
+    #[account(mut, seeds = [GRADUATOR_SEED, launch.mint.as_ref()], bump)]
+    pub graduator: UncheckedAccount<'info>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = token_mint, associated_token::authority = graduator)]
+    pub graduator_tokens: Box<Account<'info, TokenAccount>>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = graduator)]
+    pub graduator_quote: Box<Account<'info, TokenAccount>>,
+    /// CHECK: the graduator's LP ATA; Raydium creates and checks it.
+    #[account(mut)]
+    pub graduator_lp: UncheckedAccount<'info>,
+    /// CHECK: Raydium fee tier; checked in `raydium::check_amm_config`.
+    pub amm_config: UncheckedAccount<'info>,
+    /// CHECK: Raydium checks its seeds.
+    pub cpmm_authority: UncheckedAccount<'info>,
+    /// CHECK: created by Raydium, which checks its seeds.
+    #[account(mut)]
+    pub pool_state: UncheckedAccount<'info>,
+    /// CHECK: created by Raydium, which checks its seeds.
+    #[account(mut)]
+    pub lp_mint: UncheckedAccount<'info>,
+    /// CHECK: created by Raydium, which checks its seeds (token 0's vault).
+    #[account(mut)]
+    pub vault_0: UncheckedAccount<'info>,
+    /// CHECK: created by Raydium, which checks its seeds (token 1's vault).
+    #[account(mut)]
+    pub vault_1: UncheckedAccount<'info>,
+    /// CHECK: Raydium's fee receiver, fixed address.
+    #[account(mut, address = raydium::CREATE_POOL_FEE_RECEIVER)]
+    pub create_pool_fee: UncheckedAccount<'info>,
+    /// CHECK: created by Raydium, which checks its seeds.
+    #[account(mut)]
+    pub observation: UncheckedAccount<'info>,
+    /// CHECK: Raydium CPMM, fixed address.
+    #[account(address = raydium::ID)]
+    pub cpmm_program: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[event]
+pub struct GraduatedRaydium {
+    pub launch: Pubkey,
+    pub mint: Pubkey,
+    pub pool: Pubkey,
+    pub amm_config: Pubkey,
+    pub tokens: u64,
+    pub quote: u64,
+    pub lp_burned: u64,
+    pub tokens_burned: u64,
+    pub create_pool_fee: u64,
+}
+
 #[event]
 pub struct LaunchCreated {
     pub launch: Pubkey,
@@ -542,4 +755,6 @@ pub enum LaunchError {
     ZeroAmount,
     #[msg("Arithmetic overflow")]
     Overflow,
+    #[msg("Not a usable Raydium fee tier (creation disabled or trade fee over 1%)")]
+    BadFeeTier,
 }
