@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://acruxhub.com"><b>acruxhub.com</b></a> ·
   <a href="docs/01-getting-started.md">Docs</a> ·
-  <a href="https://x.com/AruxHub">X</a> ·
+  <a href="https://x.com/AcruxHub">X</a> ·
   <a href="SECURITY.md">Security</a>
 </p>
 

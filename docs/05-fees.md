@@ -28,4 +28,4 @@ They pay for running AcruxHub: hosting, storage and network fees.
 
 ## There is no AcruxHub token
 
-AcruxHub has no token and no airdrop. Any token claiming to be "the AcruxHub token" is not ours unless it is announced on [our X account](https://x.com/AruxHub) and on this site.
+AcruxHub has no token and no airdrop. Any token claiming to be "the AcruxHub token" is not ours unless it is announced on [our X account](https://x.com/AcruxHub) and on this site.

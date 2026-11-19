@@ -12,7 +12,7 @@ import { Docs } from './pages/Docs.tsx'
 
 /** Official links. The X handle is set in one place so a rename is a one-line change. */
 export const SOCIAL = {
-  x: 'https://x.com/AruxHub',
+  x: 'https://x.com/AcruxHub',
   github: 'https://github.com/acruxhub/acruxhub',
 }
 
