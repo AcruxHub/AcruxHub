@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Keypair, ComputeBudgetProgram, type PublicKey } from '@solana/web3.js'
+import { Keypair, ComputeBudgetProgram, PublicKey } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token'
 import {
   launchpadProgram, launchConfig, launchAddress, allAccounts, curveBuy, curveSell, curvePrice, curveProgress, stateOf, graduateAccounts, BN,
@@ -25,6 +25,21 @@ export function Launch() {
     return all.sort((a, b) => b.account.index.cmp(a.account.index))
   }, [w.conn, w.refreshKey])
   const quoteDecimals = useAsync(async () => (config.data ? decimalsOf(w.conn, config.data.quoteMint) : 9), [config.data])
+  // Each launch trades in the quote token its curve was created with (read from its
+  // curve's quote account), which can differ from the config's quote for new launches.
+  const launchQuotes = useAsync(async () => {
+    const ls = launches.data ?? []
+    const out = new Map<string, { mint: PublicKey; decimals: number }>()
+    for (let i = 0; i < ls.length; i += 99) {
+      const chunk = ls.slice(i, i + 99)
+      const infos = (await w.conn.getMultipleParsedAccounts(chunk.map(l => l.account.curveQuote))).value
+      chunk.forEach((l, j) => {
+        const info = (infos[j]?.data as any)?.parsed?.info
+        if (info) out.set(l.publicKey.toBase58(), { mint: new PublicKey(info.mint), decimals: info.tokenAmount.decimals })
+      })
+    }
+    return out
+  }, [launches.data, w.conn])
   // Deep link: #Launch/<launch address> opens that coin's page.
   const fromHash = (): View => {
     const key = decodeURIComponent(location.hash.split('/')[1] ?? '')
@@ -42,6 +57,10 @@ export function Launch() {
   const quoteMint = config.data.quoteMint
   const quoteSym = tokenLabel(quoteMint.toBase58())
   const qd = quoteDecimals.data ?? 9
+  const quoteOf = (l: LaunchRow) => {
+    const q = launchQuotes.data?.get(l.publicKey.toBase58())
+    return q ? { quoteMint: q.mint, quoteSym: tokenLabel(q.mint.toBase58()), qd: q.decimals } : { quoteMint, quoteSym, qd }
+  }
 
   if (view.kind === 'create' && !LAUNCHES_PAUSED) {
     return <Create quoteSym={quoteSym} qd={qd} params={config.data.params} quoteMint={quoteMint} onDone={key => setView(key ? { kind: 'coin', key } : { kind: 'list' })} />
@@ -49,7 +68,8 @@ export function Launch() {
   if (view.kind === 'coin') {
     const l = launches.data?.find(x => x.publicKey.toBase58() === view.key)
     if (!l) return <div className="card narrow">{launches.loading ? 'Loading…' : <Empty>Coin not found.</Empty>}<button onClick={() => setView({ kind: 'list' })}>← Back</button></div>
-    return <Coin l={l} quoteMint={quoteMint} quoteSym={quoteSym} qd={qd} onBack={() => setView({ kind: 'list' })} />
+    if (!launchQuotes.data) return <div className="card narrow">Loading…</div>
+    return <Coin l={l} {...quoteOf(l)} onBack={() => setView({ kind: 'list' })} />
   }
 
   return (
@@ -69,7 +89,7 @@ export function Launch() {
       {launches.loading && !launches.data && <Empty>Loading coins…</Empty>}
       {launches.data && !launches.data.length && <Empty>No coins yet. Be the first.</Empty>}
       <div className="coin-grid">
-        {launches.data?.map(l => <CoinCard key={l.publicKey.toBase58()} l={l} quoteSym={quoteSym} qd={qd} onOpen={() => setView({ kind: 'coin', key: l.publicKey.toBase58() })} />)}
+        {launches.data?.map(l => <CoinCard key={l.publicKey.toBase58()} l={l} quoteSym={quoteOf(l).quoteSym} qd={quoteOf(l).qd} onOpen={() => setView({ kind: 'coin', key: l.publicKey.toBase58() })} />)}
       </div>
     </>
   )

@@ -128,3 +128,107 @@ test('Launchpad: init, launch, buy, sell, complete, graduate into a locked AMM p
       userA: getAssociatedTokenAddressSync(pool.mintA, buyer.publicKey), userB: getAssociatedTokenAddressSync(pool.mintB, buyer.publicKey),
     }).rpc()
 })
+
+test('Launchpad: set_quote moves new launches to a new quote; old launches keep theirs', async () => {
+  const conn = await waitForChain(CHAIN_B_RPC)
+  const lp = launchpadProgram(providerFor(conn, devWallet))
+  const cfg = await lp.account.config.fetch(launchConfig())
+  const oldQuote = cfg.quoteMint as PublicKey
+  const feeRecipient = cfg.params.feeRecipient as PublicKey
+  const { ComputeBudgetProgram } = await import('@solana/web3.js')
+
+  // A launch created under the old quote, partly bought.
+  const creator = await newUser(conn)
+  const lpC = launchpadProgram(providerFor(conn, creator))
+  const oldMint = Keypair.generate()
+  await lpC.methods.createLaunch('Old Quote', 'OLDQ', 'https://example.invalid/old.json')
+    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: oldMint.publicKey, quoteMint: oldQuote })
+    .signers([oldMint]).rpc()
+  const oldKey = launchAddress(oldMint.publicKey)
+  let oldLaunch = await lp.account.launch.fetch(oldKey)
+
+  // The new quote: 6 decimals, so the curve parameters are rescaled with it.
+  const newQuote = await newMint(conn, devWallet, 6)
+  const newParams = {
+    ...cfg.params,
+    virtualQuote: new BN('30000000'),
+    graduationQuote: new BN('20000000'),
+  }
+
+  // Only the admin may switch.
+  const stranger = await newUser(conn)
+  await expectError(
+    launchpadProgram(providerFor(conn, stranger)).methods.setQuote(newParams)
+      .accountsPartial({ admin: stranger.publicKey, config: launchConfig(), quoteMint: newQuote }).rpc(),
+    'Unauthorized',
+  )
+  // Bad params are rejected.
+  await expectError(
+    lp.methods.setQuote({ ...newParams, graduationQuote: new BN(0) })
+      .accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), quoteMint: newQuote }).rpc(),
+    'BadConfig',
+  )
+  await lp.methods.setQuote(newParams).accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), quoteMint: newQuote }).rpc()
+  const after = await lp.account.config.fetch(launchConfig())
+  assert.ok((after.quoteMint as PublicKey).equals(newQuote))
+  assert.equal(after.params.graduationQuote.toString(), '20000000')
+  assert.equal(after.launchCount.toString(), cfg.launchCount.add(new BN(1)).toString(), 'launch count kept')
+
+  // New launches use the new quote; creating one with the old quote is refused.
+  const newMintKp = Keypair.generate()
+  await expectError(
+    lpC.methods.createLaunch('Wrong', 'WRNG', 'https://example.invalid/w.json')
+      .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: newMintKp.publicKey, quoteMint: oldQuote })
+      .signers([newMintKp]).rpc(),
+    'ConstraintAddress',
+  )
+  await lpC.methods.createLaunch('New Quote', 'NEWQ', 'https://example.invalid/new.json')
+    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: newMintKp.publicKey, quoteMint: newQuote })
+    .signers([newMintKp]).rpc()
+  const newKey = launchAddress(newMintKp.publicKey)
+  const newLaunch = await lp.account.launch.fetch(newKey)
+  assert.equal(newLaunch.graduationQuote.toString(), '20000000', 'new launch takes the new parameters')
+
+  const buyer = await newUser(conn)
+  const lpB = launchpadProgram(providerFor(conn, buyer))
+  const feeOld = (await getOrCreateAssociatedTokenAccount(conn, devWallet, oldQuote, feeRecipient)).address
+  const feeNew = (await getOrCreateAssociatedTokenAccount(conn, devWallet, newQuote, feeRecipient)).address
+  const buyerOld = await giveTokens(conn, devWallet, oldQuote, buyer.publicKey, 100_000_000_000n)
+  const buyerNew = await giveTokens(conn, devWallet, newQuote, buyer.publicKey, 100_000_000n)
+  const oldTrade = {
+    user: buyer.publicKey, launch: oldKey, mint: oldMint.publicKey, quoteMint: oldQuote, curveTokens: oldLaunch.curveTokens, curveQuote: oldLaunch.curveQuote,
+    userTokens: getAssociatedTokenAddressSync(oldMint.publicKey, buyer.publicKey), userQuote: buyerOld, feeQuote: feeOld,
+  }
+
+  // The old launch still trades in its own quote...
+  const q = curveBuy(stateOf(oldLaunch), 1_000_000_000n)!
+  await lpB.methods.buy(new BN('1000000000'), new BN(q.tokensOut.toString())).accountsPartial(oldTrade).rpc()
+  assert.equal(await balance(conn, oldTrade.userTokens), q.tokensOut)
+  // ...and can't be traded in the new one (its curve account holds the old quote).
+  await expectError(
+    lpB.methods.buy(new BN('1000000'), new BN(1)).accountsPartial({ ...oldTrade, quoteMint: newQuote, userQuote: buyerNew, feeQuote: feeNew }).rpc(),
+    'ConstraintTokenMint',
+  )
+
+  // The new launch trades in the new quote.
+  const qn = curveBuy(stateOf(newLaunch), 1_000_000n)!
+  await lpB.methods.buy(new BN('1000000'), new BN(qn.tokensOut.toString())).accountsPartial({
+    user: buyer.publicKey, launch: newKey, mint: newMintKp.publicKey, quoteMint: newQuote, curveTokens: newLaunch.curveTokens, curveQuote: newLaunch.curveQuote,
+    userTokens: getAssociatedTokenAddressSync(newMintKp.publicKey, buyer.publicKey), userQuote: buyerNew, feeQuote: feeNew,
+  }).rpc()
+  assert.equal(await balance(conn, newLaunch.curveQuote), qn.quoteToCurve)
+
+  // The old launch completes and graduates in its own quote after the switch.
+  oldLaunch = await lp.account.launch.fetch(oldKey)
+  const big = curveBuy(stateOf(oldLaunch), 50_000_000_000n)!
+  assert.ok(big.completes)
+  await lpB.methods.buy(new BN('50000000000'), new BN(big.tokensOut.toString())).accountsPartial(oldTrade).rpc()
+  oldLaunch = await lp.account.launch.fetch(oldKey)
+  const g = graduateAccounts(oldLaunch, oldQuote)
+  await lpB.methods.graduate().accountsPartial({ payer: buyer.publicKey, ...g })
+    .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })]).rpc()
+  oldLaunch = await lp.account.launch.fetch(oldKey)
+  assert.equal(oldLaunch.graduated, true)
+  const pool = await ammProgram(providerFor(conn, buyer)).account.pool.fetch(g.pool)
+  assert.ok([pool.mintA, pool.mintB].some((m: PublicKey) => m.equals(oldQuote)), 'graduated pool pairs with the old quote')
+})

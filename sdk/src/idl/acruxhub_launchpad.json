@@ -74,7 +74,11 @@
           "name": "mint"
         },
         {
-          "name": "quote_mint"
+          "name": "quote_mint",
+          "docs": [
+            "The launch's own quote token: whatever its curve was created with, which",
+            "stays fixed even if the config's quote changes for later launches."
+          ]
         },
         {
           "name": "curve_tokens",
@@ -654,7 +658,11 @@
           "writable": true
         },
         {
-          "name": "quote_mint"
+          "name": "quote_mint",
+          "docs": [
+            "The launch's own quote token: whatever its curve was created with, which",
+            "stays fixed even if the config's quote changes for later launches."
+          ]
         },
         {
           "name": "curve_tokens",
@@ -787,7 +795,11 @@
           "writable": true
         },
         {
-          "name": "quote_mint"
+          "name": "quote_mint",
+          "docs": [
+            "The launch's own quote token: whatever its curve was created with, which",
+            "stays fixed even if the config's quote changes for later launches."
+          ]
         },
         {
           "name": "curve_tokens",
@@ -1202,7 +1214,11 @@
           "name": "mint"
         },
         {
-          "name": "quote_mint"
+          "name": "quote_mint",
+          "docs": [
+            "The launch's own quote token: whatever its curve was created with, which",
+            "stays fixed even if the config's quote changes for later launches."
+          ]
         },
         {
           "name": "curve_tokens",
@@ -1428,6 +1444,64 @@
       ]
     },
     {
+      "name": "set_quote",
+      "docs": [
+        "Switches the quote token for future launches, with curve parameters in",
+        "that token's units. Launches already created keep their own quote token."
+      ],
+      "discriminator": [
+        59,
+        95,
+        185,
+        175,
+        67,
+        228,
+        200,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "quote_mint"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "ConfigParams"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "update_config",
       "docs": [
         "Changes curve parameters for future launches. Existing launches keep theirs."
@@ -1565,6 +1639,19 @@
         34,
         89,
         20
+      ]
+    },
+    {
+      "name": "QuoteChanged",
+      "discriminator": [
+        240,
+        49,
+        128,
+        119,
+        120,
+        0,
+        57,
+        178
       ]
     },
     {
@@ -1916,6 +2003,22 @@
           {
             "name": "index",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "QuoteChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old",
+            "type": "pubkey"
+          },
+          {
+            "name": "new",
+            "type": "pubkey"
           }
         ]
       }

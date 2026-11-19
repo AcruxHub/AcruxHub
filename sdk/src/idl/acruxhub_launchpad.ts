@@ -80,7 +80,11 @@ export type AcruxhubLaunchpad = {
           "name": "mint"
         },
         {
-          "name": "quoteMint"
+          "name": "quoteMint",
+          "docs": [
+            "The launch's own quote token: whatever its curve was created with, which",
+            "stays fixed even if the config's quote changes for later launches."
+          ]
         },
         {
           "name": "curveTokens",
@@ -660,7 +664,11 @@ export type AcruxhubLaunchpad = {
           "writable": true
         },
         {
-          "name": "quoteMint"
+          "name": "quoteMint",
+          "docs": [
+            "The launch's own quote token: whatever its curve was created with, which",
+            "stays fixed even if the config's quote changes for later launches."
+          ]
         },
         {
           "name": "curveTokens",
@@ -793,7 +801,11 @@ export type AcruxhubLaunchpad = {
           "writable": true
         },
         {
-          "name": "quoteMint"
+          "name": "quoteMint",
+          "docs": [
+            "The launch's own quote token: whatever its curve was created with, which",
+            "stays fixed even if the config's quote changes for later launches."
+          ]
         },
         {
           "name": "curveTokens",
@@ -1208,7 +1220,11 @@ export type AcruxhubLaunchpad = {
           "name": "mint"
         },
         {
-          "name": "quoteMint"
+          "name": "quoteMint",
+          "docs": [
+            "The launch's own quote token: whatever its curve was created with, which",
+            "stays fixed even if the config's quote changes for later launches."
+          ]
         },
         {
           "name": "curveTokens",
@@ -1434,6 +1450,64 @@ export type AcruxhubLaunchpad = {
       ]
     },
     {
+      "name": "setQuote",
+      "docs": [
+        "Switches the quote token for future launches, with curve parameters in",
+        "that token's units. Launches already created keep their own quote token."
+      ],
+      "discriminator": [
+        59,
+        95,
+        185,
+        175,
+        67,
+        228,
+        200,
+        29
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "quoteMint"
+        }
+      ],
+      "args": [
+        {
+          "name": "params",
+          "type": {
+            "defined": {
+              "name": "configParams"
+            }
+          }
+        }
+      ]
+    },
+    {
       "name": "updateConfig",
       "docs": [
         "Changes curve parameters for future launches. Existing launches keep theirs."
@@ -1571,6 +1645,19 @@ export type AcruxhubLaunchpad = {
         34,
         89,
         20
+      ]
+    },
+    {
+      "name": "quoteChanged",
+      "discriminator": [
+        240,
+        49,
+        128,
+        119,
+        120,
+        0,
+        57,
+        178
       ]
     },
     {
@@ -1922,6 +2009,22 @@ export type AcruxhubLaunchpad = {
           {
             "name": "index",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "quoteChanged",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old",
+            "type": "pubkey"
+          },
+          {
+            "name": "new",
+            "type": "pubkey"
           }
         ]
       }

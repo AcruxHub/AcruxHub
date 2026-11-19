@@ -57,6 +57,18 @@ pub mod acruxhub_launchpad {
         Ok(())
     }
 
+    /// Switches the quote token for future launches, with curve parameters in
+    /// that token's units. Launches already created keep their own quote token.
+    pub fn set_quote(ctx: Context<SetQuote>, params: ConfigParams) -> Result<()> {
+        params.validate()?;
+        let config = &mut ctx.accounts.config;
+        let old = config.quote_mint;
+        config.quote_mint = ctx.accounts.quote_mint.key();
+        config.params = params;
+        emit!(QuoteChanged { old, new: config.quote_mint });
+        Ok(())
+    }
+
     /// Creates a token and its curve. The creator gets nothing up front; buying is
     /// the only way to hold the token, on the same terms for everyone.
     pub fn create_launch(ctx: Context<CreateLaunch>, name: String, symbol: String, uri: String) -> Result<()> {
@@ -540,6 +552,14 @@ pub struct UpdateConfig<'info> {
 }
 
 #[derive(Accounts)]
+pub struct SetQuote<'info> {
+    pub admin: Signer<'info>,
+    #[account(mut, seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ LaunchError::Unauthorized)]
+    pub config: Account<'info, Config>,
+    pub quote_mint: Account<'info, Mint>,
+}
+
+#[derive(Accounts)]
 pub struct CreateLaunch<'info> {
     #[account(mut)]
     pub creator: Signer<'info>,
@@ -571,11 +591,12 @@ pub struct Trade<'info> {
     pub launch: Box<Account<'info, Launch>>,
     #[account(address = launch.mint)]
     pub mint: Box<Account<'info, Mint>>,
-    #[account(address = config.quote_mint)]
+    /// The launch's own quote token: whatever its curve was created with, which
+    /// stays fixed even if the config's quote changes for later launches.
     pub quote_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub curve_tokens: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
+    #[account(mut, token::mint = quote_mint)]
     pub curve_quote: Box<Account<'info, TokenAccount>>,
     #[account(init_if_needed, payer = user, associated_token::mint = mint, associated_token::authority = user)]
     pub user_tokens: Box<Account<'info, TokenAccount>>,
@@ -599,11 +620,12 @@ pub struct Graduate<'info> {
     pub launch: Box<Account<'info, Launch>>,
     #[account(mut, address = launch.mint)]
     pub token_mint: Box<Account<'info, Mint>>,
-    #[account(address = config.quote_mint)]
+    /// The launch's own quote token: whatever its curve was created with, which
+    /// stays fixed even if the config's quote changes for later launches.
     pub quote_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub curve_tokens: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
+    #[account(mut, token::mint = quote_mint)]
     pub curve_quote: Box<Account<'info, TokenAccount>>,
     /// CHECK: created by the AMM, which checks its seeds.
     #[account(mut)]
@@ -638,11 +660,12 @@ pub struct GraduateRaydium<'info> {
     pub launch: Box<Account<'info, Launch>>,
     #[account(mut, address = launch.mint)]
     pub token_mint: Box<Account<'info, Mint>>,
-    #[account(address = config.quote_mint)]
+    /// The launch's own quote token: whatever its curve was created with, which
+    /// stays fixed even if the config's quote changes for later launches.
     pub quote_mint: Box<Account<'info, Mint>>,
     #[account(mut)]
     pub curve_tokens: Box<Account<'info, TokenAccount>>,
-    #[account(mut)]
+    #[account(mut, token::mint = quote_mint)]
     pub curve_quote: Box<Account<'info, TokenAccount>>,
     /// CHECK: system-owned PDA with no data; signs as Raydium's pool creator.
     #[account(mut, seeds = [GRADUATOR_SEED, launch.mint.as_ref()], bump)]
@@ -696,6 +719,12 @@ pub struct GraduatedRaydium {
     pub lp_burned: u64,
     pub tokens_burned: u64,
     pub create_pool_fee: u64,
+}
+
+#[event]
+pub struct QuoteChanged {
+    pub old: Pubkey,
+    pub new: Pubkey,
 }
 
 #[event]
