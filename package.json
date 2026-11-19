@@ -9,7 +9,7 @@
     "launch"
   ],
   "scripts": {
-    "test:unit": "node --import tsx --test tests/seal.test.ts tests/raydium.test.ts",
+    "test:unit": "node --import tsx --test tests/seal.test.ts tests/raydium.test.ts tests/pair-rules.test.ts",
     "test:e2e": "node --import tsx --test --test-concurrency=1 tests/amm.e2e.ts tests/launchpad.e2e.ts tests/bridge.e2e.ts",
     "test:e2e:raydium": "node --import tsx --test tests/launchpad-raydium.e2e.ts"
   },

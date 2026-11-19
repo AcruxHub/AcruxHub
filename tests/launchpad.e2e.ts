@@ -248,10 +248,10 @@ test('Launchpad: approved pairs and the emergency pause', async () => {
   const pairMint = await newMint(conn, devWallet, 6)
   const pairParams = { ...cfg.params, virtualQuote: new BN('45000000'), graduationQuote: new BN('30000000') }
   await expectError(
-    lpS.methods.setPair(pairParams, true).accountsPartial({ admin: stranger.publicKey, config: launchConfig(), quoteMint: pairMint }).rpc(),
+    lpS.methods.setPair(pairParams, true).accountsPartial({ authority: stranger.publicKey, config: launchConfig(), quoteMint: pairMint }).rpc(),
     'Unauthorized',
   )
-  await lp.methods.setPair(pairParams, true).accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), quoteMint: pairMint }).rpc()
+  await lp.methods.setPair(pairParams, true).accountsPartial({ authority: devWallet.publicKey, config: launchConfig(), quoteMint: pairMint }).rpc()
   const pair = await lp.account.quotePair.fetch(launchPairAddress(pairMint))
   assert.ok(pair.enabled && (pair.mint as PublicKey).equals(pairMint))
 
@@ -284,7 +284,7 @@ test('Launchpad: approved pairs and the emergency pause', async () => {
     'PairNotAllowed',
   )
   // A disabled pair can't be used for new coins.
-  await lp.methods.setPair(pairParams, false).accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), quoteMint: pairMint }).rpc()
+  await lp.methods.setPair(pairParams, false).accountsPartial({ authority: devWallet.publicKey, config: launchConfig(), quoteMint: pairMint }).rpc()
   const r3 = Keypair.generate()
   await expectError(
     lpC.methods.createLaunch('Off', 'OFF', 'https://example.invalid/o.json')
@@ -330,4 +330,103 @@ test('Launchpad: approved pairs and the emergency pause', async () => {
   await lpC.methods.createLaunch('Back', 'BACK', 'https://example.invalid/b.json')
     .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: r5.publicKey, quoteMint: cfg.quoteMint, quotePair: null })
     .signers([r5]).rpc()
+})
+
+test('Launchpad: pair approver role is limited, and the pair keeper approves by liquidity', async () => {
+  const conn = await waitForChain(CHAIN_B_RPC)
+  const lp = launchpadProgram(providerFor(conn, devWallet))
+  const { launchPairAddress } = await import('../sdk/src/programs.ts')
+  const { poolAddresses, depositQuote } = await import('../sdk/src/programs.ts')
+  const { setAuthority, AuthorityType } = await import('@solana/spl-token')
+  const cfg = await lp.account.config.fetch(launchConfig())
+  const approver = await newUser(conn)
+  const lpA = launchpadProgram(providerFor(conn, approver))
+  const stranger = await newUser(conn)
+
+  // Only the admin names the approver.
+  await expectError(
+    launchpadProgram(providerFor(conn, stranger)).methods.setPairApprover(stranger.publicKey)
+      .accountsPartial({ admin: stranger.publicKey, config: launchConfig() }).rpc(),
+    'Unauthorized',
+  )
+  await lp.methods.setPairApprover(approver.publicKey).accountsPartial({ admin: devWallet.publicKey, config: launchConfig() }).rpc()
+
+  // The approver can approve a pair, but fee, fee recipient and supply are forced to the defaults.
+  const m1 = await newMint(conn, devWallet, 6)
+  const evil = { ...cfg.params, feeBps: 500, feeRecipient: approver.publicKey, totalSupply: new BN('2000000000000000'), virtualQuote: new BN('50000000'), graduationQuote: new BN('40000000') }
+  await lpA.methods.setPair(evil, true).accountsPartial({ authority: approver.publicKey, config: launchConfig(), quoteMint: m1 }).rpc()
+  const p1 = await lp.account.quotePair.fetch(launchPairAddress(m1))
+  assert.equal(p1.params.feeBps, cfg.params.feeBps)
+  assert.ok((p1.params.feeRecipient as PublicKey).equals(cfg.params.feeRecipient))
+  assert.equal(p1.params.totalSupply.toString(), cfg.params.totalSupply.toString())
+  assert.equal(p1.params.graduationQuote.toString(), '40000000', 'the approver does choose the quote amounts')
+
+  // Strangers can't; a revoked approver can't.
+  await expectError(
+    launchpadProgram(providerFor(conn, stranger)).methods.setPair(cfg.params, true)
+      .accountsPartial({ authority: stranger.publicKey, config: launchConfig(), quoteMint: m1 }).rpc(),
+    'Unauthorized',
+  )
+  await lp.methods.setPairApprover(PublicKey.default).accountsPartial({ admin: devWallet.publicKey, config: launchConfig() }).rpc()
+  await expectError(
+    lpA.methods.setPair(evil, false).accountsPartial({ authority: approver.publicKey, config: launchConfig(), quoteMint: m1 }).rpc(),
+    'Unauthorized',
+  )
+  await lp.methods.setPairApprover(approver.publicKey).accountsPartial({ admin: devWallet.publicKey, config: launchConfig() }).rpc()
+
+  // A liquid, fixed-supply token with an AMM pool against the default quote...
+  const quote = cfg.quoteMint as PublicKey
+  const tok = await newMint(conn, devWallet, 6)
+  const tokAta = await giveTokens(conn, devWallet, tok, devWallet.publicKey, 1_000_000_000_000n)
+  await setAuthority(conn, devWallet, tok, devWallet, AuthorityType.MintTokens, null)
+  const quoteAta = await giveTokens(conn, devWallet, quote, devWallet.publicKey, 5_000_000_000_000n) // 2,000 per pool x 2 pools, plus margin
+  const amm = ammProgram(providerFor(conn, devWallet))
+  const p = poolAddresses(tok, quote, 30)
+  await amm.methods.createPool(30).accountsPartial({ payer: devWallet.publicKey, mintA: p.mintA, mintB: p.mintB }).rpc()
+  const tokIsA = p.mintA.equals(tok)
+  // 1,000,000 tokens : 2,000 quote (9 dp) -> 1 quote = 500 tokens; liquidity 4,000.
+  const [amtA, amtB] = tokIsA ? [1_000_000_000_000n, 2_000_000_000_000n] : [2_000_000_000_000n, 1_000_000_000_000n]
+  const dq = depositQuote(0n, 0n, 0n, amtA, amtB)
+  await amm.methods.addLiquidity(new BN(amtA.toString()), new BN(amtB.toString()), new BN(dq.lp.toString())).accountsPartial({
+    payer: devWallet.publicKey, owner: devWallet.publicKey, pool: p.pool, mintA: p.mintA, mintB: p.mintB, vaultA: p.vaultA, vaultB: p.vaultB, lpMint: p.lpMint,
+    ownerA: tokIsA ? tokAta : quoteAta, ownerB: tokIsA ? quoteAta : tokAta,
+  }).rpc()
+
+  // ...and one with a freeze authority, equally liquid: must be skipped.
+  const { createMint } = await import('@solana/spl-token')
+  const frozenish = await createMint(conn, devWallet, devWallet.publicKey, devWallet.publicKey, 6)
+  const fzAta = await giveTokens(conn, devWallet, frozenish, devWallet.publicKey, 1_000_000_000_000n)
+  await setAuthority(conn, devWallet, frozenish, devWallet, AuthorityType.MintTokens, null)
+  const pf = poolAddresses(frozenish, quote, 30)
+  await amm.methods.createPool(30).accountsPartial({ payer: devWallet.publicKey, mintA: pf.mintA, mintB: pf.mintB }).rpc()
+  const fIsA = pf.mintA.equals(frozenish)
+  const [fa, fb] = fIsA ? [1_000_000_000_000n, 2_000_000_000_000n] : [2_000_000_000_000n, 1_000_000_000_000n]
+  await amm.methods.addLiquidity(new BN(fa.toString()), new BN(fb.toString()), new BN(depositQuote(0n, 0n, 0n, fa, fb).lp.toString())).accountsPartial({
+    payer: devWallet.publicKey, owner: devWallet.publicKey, pool: pf.pool, mintA: pf.mintA, mintB: pf.mintB, vaultA: pf.vaultA, vaultB: pf.vaultB, lpMint: pf.lpMint,
+    ownerA: fIsA ? fzAta : quoteAta, ownerB: fIsA ? quoteAta : fzAta,
+  }).rpc()
+
+  // Run the real keeper (no waiting period in the test), signing as the approver.
+  const { execFileSync } = await import('node:child_process')
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const dir = mkdtempSync(join(tmpdir(), 'pair-keeper-'))
+  const out = execFileSync(process.execPath, ['--import', 'tsx', 'scripts/pair-keeper.ts', '--yes'], {
+    encoding: 'utf8',
+    env: {
+      ...process.env, RPC: CHAIN_B_RPC, PAIR_APPROVER_KEY: JSON.stringify(Array.from(approver.secretKey)),
+      PAIR_MIN_LIQUIDITY: '3000', PAIR_DELIST_LIQUIDITY: '1000', PAIR_SUSTAIN_HOURS: '0', PAIR_MAX_PAIRS: '20',
+      PAIR_STATE: join(dir, 'state.json'), PAIR_LOG: join(dir, 'log.jsonl'),
+    },
+  })
+  assert.match(out, new RegExp(`approve ${tok.toBase58()}`))
+  assert.match(out, /freeze authority/)
+  const pair = await lp.account.quotePair.fetch(launchPairAddress(tok))
+  assert.equal(pair.enabled, true)
+  // Worth the same as the default curve: graduation = default x 500 tokens per quote, in 6 dp.
+  const expectedGrad = (BigInt(cfg.params.graduationQuote.toString()) * 1_000_000_000_000n) / 2_000_000_000_000n
+  assert.equal(pair.params.graduationQuote.toString(), expectedGrad.toString())
+  assert.ok((pair.params.feeRecipient as PublicKey).equals(cfg.params.feeRecipient))
+  assert.equal(await lp.account.quotePair.fetchNullable(launchPairAddress(frozenish)), null, 'freezable token not approved')
 })

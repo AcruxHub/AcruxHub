@@ -34,6 +34,8 @@ pub const GRADUATOR_SEED: &[u8] = b"graduator";
 pub const PAIR_SEED: &[u8] = b"pair";
 /// The emergency pause switch (absent = not paused).
 pub const PAUSE_SEED: &[u8] = b"pause";
+/// A key the admin lets approve or disable pairs, and nothing else (e.g. a bot).
+pub const PAIR_APPROVER_SEED: &[u8] = b"pair_approver";
 
 #[program]
 pub mod acruxhub_launchpad {
@@ -75,7 +77,28 @@ pub mod acruxhub_launchpad {
 
     /// Approves (or updates, or disables) a quote token creators can pair a coin
     /// with, with curve parameters in that token's units.
+    ///
+    /// The admin sets any parameters. The pair approver (see set_pair_approver) may
+    /// only choose the quote amounts: fee, fee recipient and supplies are forced to
+    /// the default config's, so an approver key can't redirect fees or change supply.
     pub fn set_pair(ctx: Context<SetPair>, params: ConfigParams, enabled: bool) -> Result<()> {
+        let authority = ctx.accounts.authority.key();
+        let config = &ctx.accounts.config;
+        let params = if authority == config.admin {
+            params
+        } else {
+            require!(is_pair_approver(&ctx.accounts.approver, &authority)?, LaunchError::Unauthorized);
+            let d = &config.params;
+            ConfigParams {
+                fee_bps: d.fee_bps,
+                fee_recipient: d.fee_recipient,
+                total_supply: d.total_supply,
+                curve_supply: d.curve_supply,
+                virtual_tokens: d.virtual_tokens,
+                virtual_quote: params.virtual_quote,
+                graduation_quote: params.graduation_quote,
+            }
+        };
         params.validate()?;
         let pair = &mut ctx.accounts.pair;
         pair.mint = ctx.accounts.quote_mint.key();
@@ -83,6 +106,15 @@ pub mod acruxhub_launchpad {
         pair.enabled = enabled;
         pair.bump = ctx.bumps.pair;
         emit!(PairSet { mint: pair.mint, enabled });
+        Ok(())
+    }
+
+    /// Names the key allowed to approve or disable pairs (Pubkey::default() revokes).
+    pub fn set_pair_approver(ctx: Context<SetPairApprover>, approver: Pubkey) -> Result<()> {
+        let a = &mut ctx.accounts.approver;
+        a.key = approver;
+        a.bump = ctx.bumps.approver;
+        emit!(PairApproverSet { approver });
         Ok(())
     }
 
@@ -468,6 +500,15 @@ pub mod acruxhub_launchpad {
     }
 }
 
+/// True when `signer` is the key named in the pair-approver PDA (if it exists).
+fn is_pair_approver(approver: &AccountInfo, signer: &Pubkey) -> Result<bool> {
+    if approver.data_is_empty() || *approver.owner != crate::ID {
+        return Ok(false);
+    }
+    let a = PairApprover::try_deserialize(&mut &approver.try_borrow_data()?[..])?;
+    Ok(a.key != Pubkey::default() && a.key == *signer)
+}
+
 /// The pause account is optional on chain: until an admin first sets it, it doesn't
 /// exist and nothing is paused. Once it exists it must be this program's Pause.
 fn check_not_paused(pause: &AccountInfo) -> Result<()> {
@@ -551,6 +592,13 @@ pub struct QuotePair {
 
 #[account]
 #[derive(InitSpace)]
+pub struct PairApprover {
+    pub key: Pubkey,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
 pub struct Pause {
     pub paused: bool,
     pub bump: u8,
@@ -626,13 +674,28 @@ pub struct UpdateConfig<'info> {
 
 #[derive(Accounts)]
 pub struct SetPair<'info> {
+    /// The admin, or the pair approver (checked in set_pair).
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    /// CHECK: the pair-approver PDA, read by is_pair_approver (may not exist).
+    #[account(seeds = [PAIR_APPROVER_SEED], bump)]
+    pub approver: UncheckedAccount<'info>,
+    pub quote_mint: Account<'info, Mint>,
+    #[account(init_if_needed, payer = authority, space = 8 + QuotePair::INIT_SPACE, seeds = [PAIR_SEED, quote_mint.key().as_ref()], bump)]
+    pub pair: Account<'info, QuotePair>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct SetPairApprover<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
     #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ LaunchError::Unauthorized)]
     pub config: Account<'info, Config>,
-    pub quote_mint: Account<'info, Mint>,
-    #[account(init_if_needed, payer = admin, space = 8 + QuotePair::INIT_SPACE, seeds = [PAIR_SEED, quote_mint.key().as_ref()], bump)]
-    pub pair: Account<'info, QuotePair>,
+    #[account(init_if_needed, payer = admin, space = 8 + PairApprover::INIT_SPACE, seeds = [PAIR_APPROVER_SEED], bump)]
+    pub approver: Account<'info, PairApprover>,
     pub system_program: Program<'info, System>,
 }
 
@@ -837,6 +900,11 @@ pub struct GraduatedRaydium {
 pub struct PairSet {
     pub mint: Pubkey,
     pub enabled: bool,
+}
+
+#[event]
+pub struct PairApproverSet {
+    pub approver: Pubkey,
 }
 
 #[event]

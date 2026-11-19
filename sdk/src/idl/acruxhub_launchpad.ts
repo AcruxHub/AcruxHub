@@ -1550,7 +1550,11 @@ export type AcruxhubLaunchpad = {
       "name": "setPair",
       "docs": [
         "Approves (or updates, or disables) a quote token creators can pair a coin",
-        "with, with curve parameters in that token's units."
+        "with, with curve parameters in that token's units.",
+        "",
+        "The admin sets any parameters. The pair approver (see set_pair_approver) may",
+        "only choose the quote amounts: fee, fee recipient and supplies are forced to",
+        "the default config's, so an approver key can't redirect fees or change supply."
       ],
       "discriminator": [
         42,
@@ -1564,12 +1568,12 @@ export type AcruxhubLaunchpad = {
       ],
       "accounts": [
         {
-          "name": "admin",
+          "name": "authority",
+          "docs": [
+            "The admin, or the pair approver (checked in set_pair)."
+          ],
           "writable": true,
-          "signer": true,
-          "relations": [
-            "config"
-          ]
+          "signer": true
         },
         {
           "name": "config",
@@ -1584,6 +1588,31 @@ export type AcruxhubLaunchpad = {
                   102,
                   105,
                   103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "approver",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  105,
+                  114,
+                  95,
+                  97,
+                  112,
+                  112,
+                  114,
+                  111,
+                  118,
+                  101,
+                  114
                 ]
               }
             ]
@@ -1630,6 +1659,86 @@ export type AcruxhubLaunchpad = {
         {
           "name": "enabled",
           "type": "bool"
+        }
+      ]
+    },
+    {
+      "name": "setPairApprover",
+      "docs": [
+        "Names the key allowed to approve or disable pairs (Pubkey::default() revokes)."
+      ],
+      "discriminator": [
+        173,
+        213,
+        157,
+        66,
+        144,
+        105,
+        250,
+        165
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "approver",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  112,
+                  97,
+                  105,
+                  114,
+                  95,
+                  97,
+                  112,
+                  112,
+                  114,
+                  111,
+                  118,
+                  101,
+                  114
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "approver",
+          "type": "pubkey"
         }
       ]
     },
@@ -1850,6 +1959,19 @@ export type AcruxhubLaunchpad = {
       ]
     },
     {
+      "name": "pairApprover",
+      "discriminator": [
+        100,
+        92,
+        24,
+        233,
+        199,
+        168,
+        236,
+        116
+      ]
+    },
+    {
       "name": "pause",
       "discriminator": [
         168,
@@ -1927,6 +2049,19 @@ export type AcruxhubLaunchpad = {
         34,
         89,
         20
+      ]
+    },
+    {
+      "name": "pairApproverSet",
+      "discriminator": [
+        38,
+        99,
+        212,
+        61,
+        86,
+        222,
+        51,
+        177
       ]
     },
     {
@@ -2327,6 +2462,34 @@ export type AcruxhubLaunchpad = {
           {
             "name": "index",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "pairApprover",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "key",
+            "type": "pubkey"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "pairApproverSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "approver",
+            "type": "pubkey"
           }
         ]
       }

@@ -6,6 +6,7 @@
 //   node --import tsx scripts/acrux-launchpad-admin.ts pair <quote mint> [--graduate <amount>] [--virtual <amount>] [--yes]
 //   node --import tsx scripts/acrux-launchpad-admin.ts unpair <quote mint> [--yes]
 //   node --import tsx scripts/acrux-launchpad-admin.ts pause|unpause [--yes]
+//   node --import tsx scripts/acrux-launchpad-admin.ts approver <address|none> [--yes]
 //
 // A new pair copies the default curve (supply, fee, fee recipient) with the quote
 // amounts rescaled to the pair token's decimals; --graduate / --virtual set them
@@ -62,10 +63,16 @@ if (cmd === 'status' || !cmd) {
   const enabled = cmd === 'pair'
   console.log(`${enabled ? 'approve' : 'disable'} pair ${mint.toBase58()} (${dec} decimals)${existing ? ' (updating)' : ' (new)'}`)
   console.log(`virtual quote ${whole(params.virtualQuote, dec)} · graduates at ${whole(params.graduationQuote, dec)} · fee ${params.feeBps / 100}% to ${params.feeRecipient.toBase58()}`)
-  await send(`set_pair`, await lp.methods.setPair(params, enabled).accountsPartial({ admin: kp.publicKey, config: launchConfig(), quoteMint: mint }).transaction())
+  await send(`set_pair`, await lp.methods.setPair(params, enabled).accountsPartial({ authority: kp.publicKey, config: launchConfig(), quoteMint: mint }).transaction())
 } else if (cmd === 'pause' || cmd === 'unpause') {
   console.log(`${cmd}: ${cmd === 'pause' ? 'stops new launches, buys, sells and graduations' : 'resumes everything'}`)
   await send(cmd, await lp.methods.setPaused(cmd === 'pause').accountsPartial({ admin: kp.publicKey, config: launchConfig() }).transaction())
+} else if (cmd === 'approver') {
+  // Names the key the pair keeper signs with; it can only approve or disable pairs.
+  // `approver none` revokes it.
+  const key = arg === 'none' ? PublicKey.default : new PublicKey(arg ?? '')
+  console.log(key.equals(PublicKey.default) ? 'revoke the pair approver' : `pair approver -> ${key.toBase58()} (may only approve/disable pairs; fees and supply forced to defaults)`)
+  await send('set_pair_approver', await lp.methods.setPairApprover(key).accountsPartial({ admin: kp.publicKey, config: launchConfig() }).transaction())
 } else {
   throw new Error(`unknown command ${cmd}`)
 }

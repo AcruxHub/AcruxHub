@@ -1,0 +1,108 @@
+name: Pair keeper
+
+# Approves launchpad pairs by liquidity on Acrux Net, and disables the ones it
+# approved once their liquidity falls away (rules: scripts/pair-rules.ts).
+# It signs with the PAIR APPROVER key, which the program only lets approve or
+# disable pairs: fee, fee recipient and supply are forced to the defaults.
+#
+# Off until the launchpad upgrade with pairs is live on Acrux Net
+# (docs/dev-launchpad-upgrade.md). To turn it on:
+#   1. Make a key for it:  solana-keygen new -o keys/acrux-pair-approver.json
+#      (fund it with a little ACRUX on Acrux: it pays rent for each new pair)
+#   2. As the admin, name it:  set_pair_approver(<its address>)
+#   3. Repo Settings -> Secrets and variables -> Actions:
+#        secret   PAIR_APPROVER_KEY     contents of keys/acrux-pair-approver.json
+#        variable PAIR_KEEPER_ENABLED   true
+#      optional variables PAIR_MIN_LIQUIDITY, PAIR_DELIST_LIQUIDITY,
+#      PAIR_SUSTAIN_HOURS, PAIR_MAX_PAIRS (defaults in scripts/pair-rules.ts)
+#
+# State (how long each token has been above/below the line) and the public
+# action log live on the `keeper-log` branch next to the fee keeper's log.
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write # only to push state and the public log to the keeper-log branch
+
+concurrency:
+  group: pair-keeper
+  cancel-in-progress: false
+
+jobs:
+  pair-keeper:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check configuration
+        id: cfg
+        env:
+          ENABLED: ${{ vars.PAIR_KEEPER_ENABLED }}
+          HAS_KEY: ${{ secrets.PAIR_APPROVER_KEY != '' }}
+        run: |
+          missing=""
+          [ "$ENABLED" = "true" ] || missing="$missing PAIR_KEEPER_ENABLED"
+          [ "$HAS_KEY" = "true" ] || missing="$missing PAIR_APPROVER_KEY"
+          if [ -n "$missing" ]; then
+            echo "Pair keeper not enabled yet (missing:$missing). Skipping." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.cfg.outputs.run == 'true'
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        if: steps.cfg.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        if: steps.cfg.outputs.run == 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Restore state and log
+        if: steps.cfg.outputs.run == 'true'
+        run: |
+          git fetch origin keeper-log 2>/dev/null || true
+          git show origin/keeper-log:pair-keeper-state.json > pair-keeper-state.json 2>/dev/null || rm -f pair-keeper-state.json
+          git show origin/keeper-log:pair-keeper-log.jsonl > pair-keeper-log.jsonl 2>/dev/null || rm -f pair-keeper-log.jsonl
+
+      - name: Run the pair keeper once
+        if: steps.cfg.outputs.run == 'true'
+        env:
+          RPC: https://rpc.acrux.computer
+          PAIR_APPROVER_KEY: ${{ secrets.PAIR_APPROVER_KEY }}
+          PAIR_MIN_LIQUIDITY: ${{ vars.PAIR_MIN_LIQUIDITY }}
+          PAIR_DELIST_LIQUIDITY: ${{ vars.PAIR_DELIST_LIQUIDITY }}
+          PAIR_SUSTAIN_HOURS: ${{ vars.PAIR_SUSTAIN_HOURS }}
+          PAIR_MAX_PAIRS: ${{ vars.PAIR_MAX_PAIRS }}
+        run: |
+          # Unset tuning vars that weren't configured, so the defaults apply.
+          for v in PAIR_MIN_LIQUIDITY PAIR_DELIST_LIQUIDITY PAIR_SUSTAIN_HOURS PAIR_MAX_PAIRS; do [ -n "${!v}" ] || unset $v; done
+          node --import tsx scripts/pair-keeper.ts --yes
+
+      - name: Publish state and log
+        if: steps.cfg.outputs.run == 'true' && always()
+        run: |
+          test -f pair-keeper-state.json || exit 0
+          mkdir -p /tmp/pk && cp pair-keeper-state.json /tmp/pk/ && { cp pair-keeper-log.jsonl /tmp/pk/ 2>/dev/null || true; }
+          git config user.name "acruxhub-keeper"
+          git config user.email "keeper@acruxhub.invalid"
+          if git ls-remote --exit-code --heads origin keeper-log >/dev/null; then
+            git checkout -B keeper-log origin/keeper-log
+          else
+            git checkout --orphan keeper-log
+            git rm -rf --quiet . || true
+          fi
+          cp /tmp/pk/* .
+          git add pair-keeper-state.json $(test -f pair-keeper-log.jsonl && echo pair-keeper-log.jsonl)
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -q -m "pair keeper: $(date -u +%FT%TZ)"
+          git push -q origin keeper-log

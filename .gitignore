@@ -16,3 +16,8 @@ tests/vectors/
 launch/state-local.json
 launch/keeper-log-local.jsonl
 scripts/.redeploy-local.json
+
+# pair keeper local state/log (the hosted ones live on the keeper-log branch)
+pair-keeper-state.json
+pair-keeper-log.jsonl
+keys/
