@@ -28,6 +28,7 @@ The DEX, token launchpad and explorer for [Acrux Net](https://acrux.computer), t
 |---|---|
 | **Private swaps** | Constant-product AMM. On Acrux, every swap goes out as a 2-of-3 threshold-encrypted transaction, so no single block proposer can read it early to front-run or sandwich it. |
 | **Raydium routing** | Raydium's CPMM program runs on Acrux at its mainnet address. AcruxHub quotes every AcruxHub and Raydium pool for a pair and routes each swap to the best price. |
+| **Raydium pools, no code** | Create Raydium CPMM pools on any of Raydium's 25 fee tiers, and add or remove liquidity, from the Pools page. Raydium's own site doesn't support Acrux. |
 | **Launchpad** | Pump-style one-screen coin creation: image, name, ticker, description, links, optional first buy, all in one transaction. Fixed supply, no creator allocation, and at graduation the liquidity is locked forever by burning the LP tokens. |
 | **Paste a CA** | Paste any token address on Swap to find its pools, or its launch page while it's still on the curve. |
 | **Explorer** | Live Acrux windows, proposers, slots, accounts and transactions. |

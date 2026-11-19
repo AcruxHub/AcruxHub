@@ -196,3 +196,177 @@ export function platformFee(amountIn: bigint, bps = PLATFORM_FEE_BPS) {
   const fee = bps > 0 && amountIn > 0n ? ceilDiv(amountIn * BigInt(bps), 10_000n) : 0n
   return { fee, net: amountIn - fee }
 }
+
+// ------------------------------------------------------------------ create pool, add and remove liquidity
+
+const SYSTEM_PROGRAM = new PublicKey('11111111111111111111111111111111')
+const RENT_SYSVAR = new PublicKey('SysvarRent111111111111111111111111111111111')
+const TOKEN_PROGRAM = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA')
+const TOKEN_2022_PROGRAM = new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb')
+const ATA_PROGRAM = new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+const MEMO_PROGRAM = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr')
+const INITIALIZE = Buffer.from([175, 175, 109, 31, 13, 152, 155, 237])
+const DEPOSIT = Buffer.from([242, 35, 198, 137, 82, 225, 242, 182])
+const WITHDRAW = Buffer.from([183, 18, 70, 156, 148, 109, 161, 34])
+
+/** Receives Raydium's pool-creation fee (placed on Acrux with the program). */
+export const RAYDIUM_CPMM_CREATE_FEE_RECEIVER = new PublicKey('DNXgeM9EiiaAbaWvwjHj9fQQLAX5ZsfHyvmYUNRAdNC8')
+/** LP the program locks in every new pool so it can never be emptied. */
+export const CPMM_LOCKED_LP = 100n
+export const CPMM_LP_DECIMALS = 9
+
+/** Config fields beyond the fee rates, for the create-pool form. */
+export function decodeCpmmConfigExtra(d: Buffer) {
+  return { disableCreatePool: d[9] !== 0, createPoolFee: d.readBigUInt64LE(36) }
+}
+
+const seed = (s: string) => new TextEncoder().encode(s)
+const find = (seeds: Uint8Array[]) => PublicKey.findProgramAddressSync(seeds, RAYDIUM_CPMM_ID)[0]
+
+/** Every address of the canonical (PDA) pool for a fee tier and two mints, in program order (token 0 < token 1). */
+export function cpmmPoolAddresses(config: PublicKey, mintX: PublicKey, mintY: PublicKey) {
+  const [mint0, mint1] = Buffer.compare(mintX.toBuffer(), mintY.toBuffer()) < 0 ? [mintX, mintY] : [mintY, mintX]
+  const pool = find([seed('pool'), config.toBytes(), mint0.toBytes(), mint1.toBytes()])
+  return {
+    mint0, mint1, pool,
+    lpMint: find([seed('pool_lp_mint'), pool.toBytes()]),
+    vault0: find([seed('pool_vault'), pool.toBytes(), mint0.toBytes()]),
+    vault1: find([seed('pool_vault'), pool.toBytes(), mint1.toBytes()]),
+    observation: find([seed('observation'), pool.toBytes()]),
+  }
+}
+
+const m = (pubkey: PublicKey, isWritable = false, isSigner = false) => ({ pubkey, isWritable, isSigner })
+const u64s = (disc: Buffer, ...vals: bigint[]) => {
+  const d = Buffer.alloc(8 + vals.length * 8)
+  disc.copy(d, 0)
+  vals.forEach((v, i) => d.writeBigUInt64LE(v, 8 + i * 8))
+  return d
+}
+
+/** Creates a pool and makes its first deposit, which sets the price. */
+export function cpmmInitializeInstruction(a: {
+  creator: PublicKey
+  config: PublicKey
+  mint0: PublicKey
+  mint1: PublicKey
+  program0: PublicKey
+  program1: PublicKey
+  /** The creator's token accounts for token 0 and 1, and their LP ATA (created by the program). */
+  user0: PublicKey
+  user1: PublicKey
+  userLp: PublicKey
+  amount0: bigint
+  amount1: bigint
+  openTime?: bigint
+}): TransactionInstruction {
+  const p = cpmmPoolAddresses(a.config, a.mint0, a.mint1)
+  if (!p.mint0.equals(a.mint0)) throw new Error('mint0 must sort before mint1')
+  return new TransactionInstruction({
+    programId: RAYDIUM_CPMM_ID,
+    keys: [
+      m(a.creator, true, true), // the program pays rent and the creation fee from it
+      m(a.config),
+      m(RAYDIUM_CPMM_AUTHORITY),
+      m(p.pool, true),
+      m(a.mint0),
+      m(a.mint1),
+      m(p.lpMint, true),
+      m(a.user0, true),
+      m(a.user1, true),
+      m(a.userLp, true),
+      m(p.vault0, true),
+      m(p.vault1, true),
+      m(RAYDIUM_CPMM_CREATE_FEE_RECEIVER, true),
+      m(p.observation, true),
+      m(TOKEN_PROGRAM),
+      m(a.program0),
+      m(a.program1),
+      m(ATA_PROGRAM),
+      m(SYSTEM_PROGRAM),
+      m(RENT_SYSVAR),
+    ],
+    data: u64s(INITIALIZE, a.amount0, a.amount1, a.openTime ?? 0n),
+  })
+}
+
+/** LP the creator receives from a new pool: sqrt(amount0 * amount1) minus the locked part. */
+export function cpmmInitialLp(amount0: bigint, amount1: bigint) {
+  let x = amount0 * amount1
+  if (x < 2n) return 0n
+  let y = (x + 1n) / 2n
+  let r = x
+  while (y < r) { r = y; y = (r + x / r) / 2n }
+  return r > CPMM_LOCKED_LP ? r - CPMM_LOCKED_LP : 0n
+}
+
+/**
+ * Tokens for an LP amount, as the program computes them: rounded up for a
+ * deposit (what you must put in), down for a withdrawal (what you get back).
+ */
+export function cpmmLpToTokens(lp: bigint, lpSupply: bigint, reserve0: bigint, reserve1: bigint, roundUp: boolean) {
+  if (lpSupply === 0n) return { amount0: 0n, amount1: 0n }
+  const conv = (r: bigint) => {
+    const q = (lp * r) / lpSupply
+    return roundUp && (lp * r) % lpSupply > 0n && q > 0n ? q + 1n : q
+  }
+  return { amount0: conv(reserve0), amount1: conv(reserve1) }
+}
+
+/** The deposit for a chosen amount of one token: LP minted and what both sides cost. */
+export function cpmmDepositQuote(amountIn: bigint, side: 0 | 1, lpSupply: bigint, reserve0: bigint, reserve1: bigint) {
+  const lp = (amountIn * lpSupply) / (side === 0 ? reserve0 : reserve1)
+  return { lp, ...cpmmLpToTokens(lp, lpSupply, reserve0, reserve1, true) }
+}
+
+type LiqAccounts = {
+  pool: CpmmPool
+  owner: PublicKey
+  userLp: PublicKey
+  /** Owner's token accounts for the pool's token A (0) and B (1). */
+  user0: PublicKey
+  user1: PublicKey
+}
+const liqKeys = (a: LiqAccounts) => [
+  m(a.owner, false, true),
+  m(RAYDIUM_CPMM_AUTHORITY),
+  m(a.pool.address, true),
+  m(a.userLp, true),
+  m(a.user0, true),
+  m(a.user1, true),
+  m(a.pool.vaultA, true),
+  m(a.pool.vaultB, true),
+  m(TOKEN_PROGRAM),
+  m(TOKEN_2022_PROGRAM),
+  m(a.pool.mintA),
+  m(a.pool.mintB),
+  m(a.pool.lpMint, true),
+]
+
+/** Mints `lp` LP for at most max0/max1 of the two tokens. */
+export function cpmmDepositInstruction(a: LiqAccounts & { lp: bigint; max0: bigint; max1: bigint }) {
+  return new TransactionInstruction({ programId: RAYDIUM_CPMM_ID, keys: liqKeys(a), data: u64s(DEPOSIT, a.lp, a.max0, a.max1) })
+}
+
+/** Burns `lp` LP for at least min0/min1 of the two tokens. */
+export function cpmmWithdrawInstruction(a: LiqAccounts & { lp: bigint; min0: bigint; min1: bigint }) {
+  return new TransactionInstruction({ programId: RAYDIUM_CPMM_ID, keys: [...liqKeys(a), m(MEMO_PROGRAM)], data: u64s(WITHDRAW, a.lp, a.min0, a.min1) })
+}
+
+export type CpmmFeeTier = CpmmConfig & { disableCreatePool: boolean; createPoolFee: bigint }
+
+/** The fee tiers (AmmConfig index 0..max) a pool can be created on, read in one call. */
+export async function loadCpmmFeeTiers(conn: Connection, max = 32): Promise<CpmmFeeTier[]> {
+  const ids = Array.from({ length: max }, (_, i) => {
+    const b = new Uint8Array(2); new DataView(b.buffer).setUint16(0, i, false)
+    return find([seed('amm_config'), b])
+  })
+  const infos = await conn.getMultipleAccountsInfo(ids)
+  const out: CpmmFeeTier[] = []
+  infos.forEach((info, i) => {
+    if (!info || !info.owner.equals(RAYDIUM_CPMM_ID)) return
+    const d = info.data as Buffer
+    try { out.push({ ...decodeCpmmConfig(ids[i], d), ...decodeCpmmConfigExtra(d) }) } catch { /* not a config */ }
+  })
+  return out.sort((a, b) => (a.tradeFeeRate === b.tradeFeeRate ? a.index - b.index : a.tradeFeeRate < b.tradeFeeRate ? -1 : 1))
+}

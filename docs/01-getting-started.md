@@ -20,6 +20,7 @@ Open **Portfolio** and press **Get test funds**. Your address is copied and the 
 | Page | What it's for |
 |---|---|
 | **Swap** | Trade tokens at the best price across AcruxHub and Raydium pools. Paste any token's address (CA) to find its pools. |
+| **Pools** | Create AcruxHub or Raydium pools and add or remove liquidity, no code needed. |
 | **Launch** | Create a coin in one step, or buy coins still on their bonding curve. |
 | **Pools** | Create pools and add or remove liquidity. |
 | **Explorer** | Live Acrux Net data: current window, proposers, slots, accounts, transactions. |
