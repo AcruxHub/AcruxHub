@@ -163,7 +163,7 @@ export const graduatorAddress = (mint: PublicKey) => pda([enc('graduator'), mint
 /**
  * All accounts `graduate_raydium` needs: the launch's coin paired with the quote
  * mint in a Raydium CPMM pool on fee tier `ammConfig` (trade fee at most 1%).
- * It uses about 180k compute units; send it with a limit of 300k or more.
+ * It uses about 252k compute units on Acrux Net (187k on a local validator); send it with a limit of 300k or more.
  */
 export function graduateRaydiumAccounts(launch: { mint: PublicKey; curveTokens: PublicKey; curveQuote: PublicKey }, quoteMint: PublicKey, ammConfig: PublicKey) {
   const graduator = graduatorAddress(launch.mint)

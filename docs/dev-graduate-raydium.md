@@ -1,6 +1,6 @@
 # Dev note: graduating into a Raydium CPMM pool
 
-Status: built and tested on a local validator only. Not deployed to Acrux Net.
+Status: LIVE on Acrux Net since 2026-11-19 (in-place upgrade of `3qCdE6gN…`, slot 2,058,374; it cost 0.508 test ACRUX). Checked live with `scripts/acrux-graduate-raydium-check.ts`: a test coin (GRADT) graduated into Raydium pool `8CSthJ87Dg7vVFDBMcPbWbMJ7xmdCX3YTMdzScjYCqNr` at the curve's final price, all LP burned, graduator left empty, caller charged exactly the 0.15 fee + 0.04011744 rent + tx fee. On Acrux it used 251,747 compute units, so send it with a 300k+ limit.
 
 ## What changes
 

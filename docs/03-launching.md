@@ -43,6 +43,12 @@ Once 20 AXB is raised, trading on the curve stops and **anyone** can press **Gra
 
 After that the coin trades on **Swap**.
 
+### Or graduate into a Raydium pool
+
+The launchpad can also graduate a coin into a **Raydium CPMM pool** instead (the `graduate_raydium` instruction). It works the same way: same amounts, the pool opens at the curve's final price, every LP token is burned and leftover tokens are burned. Whoever triggers it picks the Raydium fee tier (trade fee at most 1%) and pays Raydium's 0.15 ACRUX pool-creation fee plus the pool's rent, about 0.19 ACRUX in total.
+
+Either graduation can be used, but only once: whichever lands first graduates the coin. The site's button uses the AcruxHub pool for now; Raydium graduation is available to anyone calling the program directly (`graduateRaydiumAccounts()` in the SDK).
+
 ## Metadata
 
 The image and details are stored in AcruxHub's file storage under a name derived from the file's contents (SHA-256). Each coin records a link to its details on chain. That link can't be changed after launch, so check your links before you create.
