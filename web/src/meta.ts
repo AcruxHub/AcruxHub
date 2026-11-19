@@ -1,4 +1,5 @@
 // Coin metadata (image, description, links) referenced by a launch's on-chain `uri`.
+import { API_BASE } from './native.ts'
 import { useEffect, useState } from 'react'
 
 export type CoinMeta = {
@@ -52,7 +53,7 @@ export function useMeta(uri: string | undefined): CoinMeta | null {
 export async function uploadCoin(input: {
   name: string; symbol: string; description: string; image: string; x: string; telegram: string; website: string
 }): Promise<{ uri: string; image: string }> {
-  const res = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
+  const res = await fetch(`${API_BASE}/api/upload`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(body.error ?? `Upload failed (HTTP ${res.status})`)
   return body

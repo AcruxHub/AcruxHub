@@ -38,7 +38,18 @@ function social(v: unknown, kind: 'x' | 'telegram' | 'website'): string {
   return kind === 'x' ? `https://x.com/${handle}` : `https://t.me/${handle}`
 }
 
+// The iPhone and Android apps serve the site from their own origins, so they need CORS.
+const APP_ORIGINS = new Set(['capacitor://localhost', 'https://localhost'])
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const origin = String(req.headers.origin ?? '')
+  if (APP_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+    res.setHeader('Access-Control-Allow-Methods', 'POST')
+    res.setHeader('Access-Control-Allow-Headers', 'content-type')
+  }
+  if (req.method === 'OPTIONS') return res.status(204).end()
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' })
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body ?? {}
 

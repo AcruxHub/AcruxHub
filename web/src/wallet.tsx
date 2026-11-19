@@ -1,11 +1,14 @@
 // Wallet + network context. Two wallet kinds:
-//  - "test wallet": a keypair kept in this browser, for faucet funds only
+//  - "key wallet": a keypair kept on this device (browser storage on the site, the
+//    Keychain/Keystore in the app)
 //  - an injected Solana wallet (Phantom, Backpack, ...) via window.solana
 // Transactions on Acrux Net can go out "private" (threshold-encrypted to the
 // slot's proposers) so no single proposer can read them before ordering.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js'
+import bs58 from 'bs58'
+import { store } from './native.ts'
 import * as anchor from '@coral-xyz/anchor'
 import { privateSend, waitForTx } from '@acruxhub/sdk'
 import { NETWORKS, connectionFor, type Network } from './net.ts'
@@ -27,7 +30,10 @@ type Ctx = {
   connectTest(): void
   connectInjected(): Promise<void>
   disconnect(): void
+  /** The key wallet's secret key, base58 (the format Phantom and Backpack import). */
   exportTestKey(): string | null
+  /** Use a secret key (base58, or a JSON byte array) as the key wallet. */
+  importTestKey(secret: string): void
   privateMode: boolean
   setPrivateMode(v: boolean): void
   provider: anchor.AnchorProvider | null
@@ -41,15 +47,21 @@ const WalletContext = createContext<Ctx | null>(null)
 const KEY_STORE = 'acruxhub.testWallet'
 const NET_STORE = 'acruxhub.network'
 
-const store = {
-  get: (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
-  set: (k: string, v: string) => { try { localStorage.setItem(k, v) } catch { /* private mode */ } },
-  del: (k: string) => { try { localStorage.removeItem(k) } catch { /* ignore */ } },
-}
 
 function injected(): Injected | null {
   const w = window as any
   return w.phantom?.solana ?? w.backpack ?? w.solana ?? null
+}
+
+/** The key wallet saved on this device, if any. */
+function storedKey(): Keypair | null {
+  const raw = store.get(KEY_STORE)
+  try { return raw ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw))) : null } catch { return null }
+}
+
+/** Address of the key wallet saved on this device, if any. */
+export function storedKeyAddress(): string | null {
+  return storedKey()?.publicKey.toBase58() ?? null
 }
 
 export function WalletProvider({ children }: { children: ReactNode }) {
@@ -57,10 +69,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // Production builds only talk to Acrux Net; the local chain is a dev tool.
   const network = (import.meta.env.DEV && NETWORKS[netId]) || NETWORKS.acrux
   const conn = useMemo(() => connectionFor(network), [network])
-  const [test, setTest] = useState<Keypair | null>(() => {
-    const raw = store.get(KEY_STORE)
-    return raw ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(raw))) : null
-  })
+  const [test, setTest] = useState<Keypair | null>(storedKey)
   const [inj, setInj] = useState<{ w: Injected; pk: PublicKey } | null>(null)
   const [privateMode, setPrivateMode] = useState(true)
   const [refreshKey, setRefresh] = useState(0)
@@ -74,11 +83,28 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const setNetwork = (id: Network['id']) => { store.set(NET_STORE, id); setNetId(id) }
 
   const connectTest = useCallback(() => {
-    const kp = test ?? Keypair.generate()
+    // Reconnect to the saved key if there is one: Disconnect only forgets the session,
+    // and a fresh key here would overwrite the old one and strand its funds.
+    const kp = test ?? storedKey() ?? Keypair.generate()
     store.set(KEY_STORE, JSON.stringify(Array.from(kp.secretKey)))
     setInj(null)
     setTest(kp)
   }, [test])
+
+  const importTestKey = useCallback((secret: string) => {
+    const s = secret.trim()
+    let bytes: Uint8Array
+    try {
+      bytes = s.startsWith('[') ? Uint8Array.from(JSON.parse(s)) : bs58.decode(s)
+    } catch {
+      throw new Error("That doesn't look like a secret key.")
+    }
+    if (bytes.length !== 64) throw new Error(`A secret key is 64 bytes; this one is ${bytes.length}.`)
+    const kp = Keypair.fromSecretKey(bytes)
+    store.set(KEY_STORE, JSON.stringify(Array.from(kp.secretKey)))
+    setInj(null)
+    setTest(kp)
+  }, [])
 
   const connectInjected = useCallback(async () => {
     const w = injected()
@@ -144,7 +170,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const value: Ctx = {
     network, setNetwork, conn, publicKey, kind, connectTest, connectInjected, disconnect,
-    exportTestKey: () => (test ? JSON.stringify(Array.from(test.secretKey)) : null),
+    exportTestKey: () => (test ? bs58.encode(test.secretKey) : null),
+    importTestKey,
     privateMode: privateMode && !!network.gateway, setPrivateMode,
     provider, send, refreshKey, bump: () => setRefresh(r => r + 1),
   }

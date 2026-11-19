@@ -1,0 +1,79 @@
+# Builds the iPhone and Android apps (Capacitor shells around the web app) on
+# GitHub's machines, so nothing needs Android Studio or a Mac locally.
+#  - Android: a debug APK you can install on a phone (download it from the run's Artifacts).
+#  - iOS: a simulator build, which proves the Xcode project compiles. A signed build for
+#    TestFlight/App Store needs an Apple Developer account and is a separate step.
+name: mobile
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['web/**', 'sdk/**', 'docs/**', '.github/workflows/mobile.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci --ignore-scripts
+      - name: Build the web app
+        run: npx tsc --noEmit -p web && npx vite build web
+      - name: Copy it into the Android project
+        working-directory: web
+        run: npx cap sync android
+      - name: Build the debug APK
+        working-directory: web/android
+        run: chmod +x gradlew && ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: acruxhub-android-debug
+          path: web/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+
+  ios:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Build the web app
+        run: npx tsc --noEmit -p web && npx vite build web
+      - name: Copy it into the iOS project
+        working-directory: web
+        run: npx cap sync ios
+      - name: Build for the iOS simulator (unsigned)
+        working-directory: web/ios/App
+        run: |
+          xcodebuild -project App.xcodeproj -scheme App -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO build | tail -40
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: Package the simulator app
+        working-directory: web/ios/App
+        run: cd build/Build/Products/Debug-iphonesimulator && zip -qr "$GITHUB_WORKSPACE/AcruxHub-simulator.zip" App.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: acruxhub-ios-simulator
+          path: AcruxHub-simulator.zip
+          retention-days: 14

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react'
+import { tap } from './native.ts'
 
 /** A button that runs an async action and shows its result or error underneath. */
 export function Action({ label, run, disabled, primary = true, className }: { label: ReactNode; run: () => Promise<string | void>; disabled?: boolean; primary?: boolean; className?: string }) {
@@ -16,8 +17,10 @@ export function Action({ label, run, disabled, primary = true, className }: { la
           try {
             const r = await run()
             setMsg(r ? { ok: true, text: r } : null)
+            tap('success')
           } catch (e: any) {
             setMsg({ ok: false, text: friendly(e) })
+            tap('error')
           } finally {
             setBusy(false)
           }

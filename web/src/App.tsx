@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useWallet } from './wallet.tsx'
+import { KeyBackup, KeyImport } from './keys.tsx'
+import { isNative } from './native.ts'
 import { short, NETWORKS, refreshDemoTokens, LAUNCHES_PAUSED } from './net.ts'
 import { useAsync, deployed } from './hooks.ts'
 import { Swap } from './pages/Swap.tsx'
@@ -134,6 +136,8 @@ function WalletButton() {
   const w = useWallet()
   const [open, setOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [modal, setModal] = useState<'backup' | 'import' | null>(null)
+  const modals = <>{modal === 'backup' && <KeyBackup onClose={() => setModal(null)} />}{modal === 'import' && <KeyImport onClose={() => setModal(null)} />}</>
   useEffect(() => {
     if (!open) return
     const close = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.wallet')) setOpen(false) }
@@ -146,11 +150,13 @@ function WalletButton() {
         <button onClick={() => setOpen(o => !o)}>Connect</button>
         {open && (
           <div className="menu">
-            <button onClick={() => w.connectInjected().then(() => setOpen(false), e => setErr(e.message))}>Browser wallet <small>Phantom, Backpack…</small></button>
-            <button onClick={() => { w.connectTest(); setOpen(false) }}>Browser key <small>kept in this browser: small amounts only</small></button>
+            {!isNative && <button onClick={() => w.connectInjected().then(() => setOpen(false), e => setErr(e.message))}>Browser wallet <small>Phantom, Backpack…</small></button>}
+            <button onClick={() => { w.connectTest(); setOpen(false) }}>{isNative ? 'App wallet' : 'Browser key'} <small>{isNative ? 'a key kept in this phone’s secure storage' : 'kept in this browser: small amounts only'}</small></button>
+            <button onClick={() => { setModal('import'); setOpen(false) }}>Import a key <small>restore a backup, or move a wallet in</small></button>
             {err && <p className="error" style={{ padding: '0 12px' }}>{err}</p>}
           </div>
         )}
+        {modals}
       </div>
     )
   }
@@ -167,9 +173,11 @@ function WalletButton() {
               Private sends <small>encrypted to 3 proposers, readable once 2 include it</small>
             </label>
           )}
+          {w.kind === 'test' && <button onClick={() => { setModal('backup'); setOpen(false) }}>Back up key</button>}
           <button onClick={() => { w.disconnect(); setOpen(false) }}>Disconnect</button>
         </div>
       )}
+      {modals}
     </div>
   )
 }
