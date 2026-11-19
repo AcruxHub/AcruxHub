@@ -9,6 +9,8 @@ export type Network = {
   gateway?: AcruxGateway
   /** Quote token for the launchpad on this network. */
   explorerNative: string
+  /** Receives AcruxHub's 0.1% swap fee. Absent = no fee on this network. */
+  feeRecipient?: PublicKey
 }
 
 export const NETWORKS: Record<Network['id'], Network> = {
@@ -18,6 +20,7 @@ export const NETWORKS: Record<Network['id'], Network> = {
     rpc: 'https://rpc.acrux.computer',
     gateway: new AcruxGateway('https://rpc.acrux.computer', 'https://api.acrux.computer'),
     explorerNative: 'ACRUX',
+    feeRecipient: new PublicKey('AcXRKoSUCGACXU2ygruLFYMx26KdotYX9KHRcsNC2oBd'),
   },
   local: {
     id: 'local',

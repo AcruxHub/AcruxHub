@@ -3,18 +3,26 @@
 ## How to swap
 
 1. Open **Swap**.
-2. Pick a pool, or **paste a token address (CA)**. AcruxHub finds the deepest pool for that token and sets you up to buy it. If the token is still on its launch curve, it links you to the coin's page instead.
-3. Enter an amount. The page shows what you'll receive, the **price impact** (how much your trade moves the price) and the **minimum received** after slippage.
+2. Pick a pair, or **paste a token address (CA)**. AcruxHub finds every pool for that token and sets you up to buy it. If the token is still on its launch curve, it links you to the coin's page instead.
+3. Enter an amount. The page shows what you'll receive, the **route** (which pool it goes through), the **price impact** (how much your trade moves the price), the **minimum received** after slippage, and AcruxHub's fee.
 4. Press **Swap** and approve in your wallet.
 
 You can share a direct link: `https://acruxhub.com/#Swap/<token address>`.
 
+## Best-price routing: AcruxHub and Raydium pools
+
+Raydium's CPMM pool program runs on Acrux Net at its Solana mainnet address (`CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C`), placed there by the Acrux team. Pools made with Raydium's own tools exist on Acrux, but Raydium's website doesn't show Acrux.
+
+AcruxHub reads every Raydium CPMM pool on the chain next to its own pools. For each swap it quotes **every pool for the pair**, using each program's exact math, and sends your swap to the one that pays you the most. When a pair has more than one pool, the page lists each pool's quote and marks the one it picked.
+
+Raydium pools whose tokens use a Token-2022 transfer fee aren't routed yet, because the quote would be wrong.
+
 ## Slippage and deadlines
 
-Every swap carries two guards, enforced by the program on chain:
+Every swap carries these guards, enforced on chain:
 
 - **Minimum output**: if the price moves against you by more than your slippage setting (0.5% by default), the swap fails instead of filling at a worse price.
-- **Deadline**: a swap must land within about 300 slots (15 seconds) of being signed, or it fails.
+- **Deadline**: on AcruxHub pools, a swap must land within about 300 slots (15 seconds) of being signed, or it fails. Raydium's program has no deadline argument, so a Raydium-routed swap is limited by the transaction's blockhash instead, which expires after about a minute on Acrux.
 
 ## Private sends (front-running protection)
 
@@ -32,4 +40,4 @@ Our sealing code is an independent implementation of the published Acrux wire fo
 
 ## Fees
 
-Each pool has a fee set at creation (0.05%, 0.30% or 1.00%). See [Fees](#Docs/fees).
+Each pool has its own fee: 0.05%, 0.30% or 1.00% on AcruxHub pools, and the pool's fee tier on Raydium pools (0.25% on the most common one). On top of that, AcruxHub takes **0.1%** of what you pay. See [Fees](#Docs/fees).
