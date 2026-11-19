@@ -130,3 +130,7 @@ textarea { resize: vertical; }
   .docs { grid-template-columns: 1fr; }
   .docs-nav { position: static; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
 }
+
+/* Status banners (e.g. launches paused) */
+.notice { border-left: 3px solid var(--warn); }
+.notice strong { color: var(--warn); }

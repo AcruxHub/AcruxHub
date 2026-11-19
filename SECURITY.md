@@ -1,6 +1,6 @@
 # Security policy
 
-AcruxHub has **not had an independent audit**. It runs on Acrux Net with test tokens. Don't route real value through it.
+AcruxHub has **not had an independent audit**. It runs on Acrux Net, which switches from test tokens to real ACRUX at slot 4,752,000 (about 22:00 UTC on Nov 20). Use it at your own risk, only with amounts you can afford to lose.
 
 ## Reporting a vulnerability
 

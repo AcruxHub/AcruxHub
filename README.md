@@ -20,7 +20,7 @@
 
 The DEX, token launchpad and explorer for [Acrux Net](https://acrux.computer), the 50 ms Solana fork. Live at **[acruxhub.com](https://acruxhub.com)**.
 
-> Independent project, not affiliated with the Acrux team. Acrux Net uses test tokens, and this code has **not been audited**.
+> Independent project, not affiliated with the Acrux team. This code has **not been audited**. From Acrux's gas switch (slot 4,752,000, about 22:00 UTC on Nov 20) Acrux runs on real ACRUX, so use it at your own risk, only with amounts you can afford to lose.
 
 ## What's live
 

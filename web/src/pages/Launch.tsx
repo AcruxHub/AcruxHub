@@ -9,7 +9,7 @@ import {
 import { useWallet, readProvider } from '../wallet.tsx'
 import { useAsync, tokenLabel } from '../hooks.ts'
 import { loadLaunchConfig, decimalsOf } from '../data.ts'
-import { fmt, parseAmount, short } from '../net.ts'
+import { fmt, parseAmount, short, LAUNCHES_PAUSED } from '../net.ts'
 import { Action, Empty, CopyButton } from '../ui.tsx'
 import { useMeta, safeUrl, uploadCoin, readImage, type CoinMeta } from '../meta.ts'
 
@@ -43,7 +43,7 @@ export function Launch() {
   const quoteSym = tokenLabel(quoteMint.toBase58())
   const qd = quoteDecimals.data ?? 9
 
-  if (view.kind === 'create') {
+  if (view.kind === 'create' && !LAUNCHES_PAUSED) {
     return <Create quoteSym={quoteSym} qd={qd} params={config.data.params} quoteMint={quoteMint} onDone={key => setView(key ? { kind: 'coin', key } : { kind: 'list' })} />
   }
   if (view.kind === 'coin') {
@@ -54,10 +54,17 @@ export function Launch() {
 
   return (
     <>
-      <div className="launch-hero">
-        <button className="primary big" onClick={() => setView({ kind: 'create' })}>Start a new coin</button>
-        <small>Free to create · fixed supply, no presale, no creator allocation · liquidity locked forever on graduation</small>
-      </div>
+      {LAUNCHES_PAUSED ? (
+        <div className="card notice" role="status" style={{ marginBottom: 16 }}>
+          <strong>Launches paused</strong>
+          <p style={{ margin: '6px 0 0' }}>{LAUNCHES_PAUSED}</p>
+        </div>
+      ) : (
+        <div className="launch-hero">
+          <button className="primary big" onClick={() => setView({ kind: 'create' })}>Start a new coin</button>
+          <small>Free to create · fixed supply, no presale, no creator allocation · liquidity locked forever on graduation</small>
+        </div>
+      )}
       {launches.error && <p className="error">Could not load coins: {launches.error}</p>}
       {launches.loading && !launches.data && <Empty>Loading coins…</Empty>}
       {launches.data && !launches.data.length && <Empty>No coins yet. Be the first.</Empty>}

@@ -4,10 +4,10 @@
 No. It's an independent project built on Acrux Net.
 
 **Do tokens on AcruxHub have value?**
-Not today. Acrux Net uses faucet tokens, and there's no bridge for real assets yet.
+At Acrux slot **4,752,000** (about 22:00 UTC on Nov 20), gas on Acrux becomes **real ACRUX** bridged from Solana. Test ACRUX retires at that slot and the faucet closes. From then on, fees are paid in real ACRUX. AXA and AXB are the faucet's demo tokens and have no value.
 
 **Why is the launchpad priced in AXB, not ACRUX?**
-Launches need a token-standard quote currency. Acrux Net doesn't have a wrapped form of ACRUX yet, so the faucet's AXB stands in for it.
+Launches need a token-standard quote currency, and Acrux doesn't have a wrapped form of ACRUX yet, so the faucet's AXB stood in for it. With the faucet closing, new launches are paused until the launchpad can price in ACRUX.
 
 **My swap failed with "Slippage".**
 The price moved more than your slippage setting allows, so the program refused to fill at a worse price. Try again, or raise slippage a little.

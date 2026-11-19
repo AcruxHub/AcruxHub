@@ -3,7 +3,7 @@ import { withdrawQuote } from '@acruxhub/sdk'
 import { useWallet } from '../wallet.tsx'
 import { useAsync, holdings, tokenLabel } from '../hooks.ts'
 import { loadPools, launchSymbols } from '../data.ts'
-import { fmt } from '../net.ts'
+import { fmt, GAS_SWITCH_SLOT, GAS_SWITCH_TIME } from '../net.ts'
 import { Action, Empty, NeedWallet } from '../ui.tsx'
 
 export function Portfolio() {
@@ -18,6 +18,9 @@ export function Portfolio() {
     ])
     return { lamports, toks, pools, symbols }
   }, [w.publicKey, w.conn, w.refreshKey])
+  // Before Acrux's gas switch the faucet still works; after it, ACRUX comes over the bridge.
+  const slot = useAsync(() => w.conn.getSlot(), [w.conn])
+  const beforeSwitch = slot.data == null || slot.data < GAS_SWITCH_SLOT
 
   if (!w.publicKey) return <div className="card narrow"><h2>Portfolio</h2><NeedWallet /></div>
   if (data.loading && !data.data) return <div className="card narrow">Loading…</div>
@@ -35,17 +38,21 @@ export function Portfolio() {
         <small className="mono">{w.publicKey.toBase58()}</small>
         {w.network.gateway && (
           <div style={{ marginTop: 12 }}>
-            {/* The faucet API only accepts browser calls from acrux.computer, so send people there. */}
+            {/* Both acrux.computer pages only work from there, so send people over with their address copied. */}
             <button
               style={{ width: '100%' }}
               onClick={() => {
                 navigator.clipboard?.writeText(w.publicKey!.toBase58()).catch(() => {})
-                window.open('https://acrux.computer/faucet', '_blank', 'noopener')
+                window.open(beforeSwitch ? 'https://acrux.computer/faucet' : 'https://acrux.computer/bridge', '_blank', 'noopener')
               }}
             >
-              Get test funds (opens the Acrux faucet, address copied)
+              {beforeSwitch ? 'Get test funds (opens the Acrux faucet, address copied)' : 'Bridge ACRUX from Solana (opens the Acrux bridge, address copied)'}
             </button>
-            <small>2 ACRUX + 100 AXA + 100 AXB per grant. Paste your address there, then come back and refresh.</small>
+            <small>
+              {beforeSwitch
+                ? <>Test ACRUX and the faucet retire at Acrux slot {GAS_SWITCH_SLOT.toLocaleString('en-US')} ({GAS_SWITCH_TIME}). After that, fees are paid in real ACRUX bridged from Solana.</>
+                : <>Fees on Acrux are paid in real ACRUX. Bridge it from Solana, then paste this address as the destination.</>}
+            </small>
           </div>
         )}
         <h3>Tokens</h3>

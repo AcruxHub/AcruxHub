@@ -1,6 +1,6 @@
 # Security and risks
 
-**AcruxHub has not had an independent audit.** Use test funds only.
+**AcruxHub has not had an independent audit.** From Acrux's gas switch (slot 4,752,000, about 22:00 UTC on Nov 20), Acrux runs on real ACRUX: use AcruxHub at your own risk, only with amounts you can afford to lose.
 
 ## What is tested
 

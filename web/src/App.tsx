@@ -80,7 +80,7 @@ export function App() {
           <a href="#Docs">Docs</a>
           <a href="#Docs/security">Security</a>
         </div>
-        Independent project, not affiliated with Acrux. Test network: tokens here have no value. Code is unaudited.
+        Independent project, not affiliated with Acrux. The code is unaudited: use it at your own risk, only with amounts you can afford to lose.
       </footer>
     </div>
   )
@@ -109,7 +109,7 @@ function WalletButton() {
         <button className="primary" onClick={() => setOpen(o => !o)}>Connect</button>
         {open && (
           <div className="menu">
-            <button onClick={() => { w.connectTest(); setOpen(false) }}>Test wallet <small>kept in this browser, faucet funds only</small></button>
+            <button onClick={() => { w.connectTest(); setOpen(false) }}>Browser key <small>kept in this browser: small amounts only</small></button>
             <button onClick={() => w.connectInjected().then(() => setOpen(false), e => setErr(e.message))}>Browser wallet <small>Phantom, Backpack…</small></button>
             {err && <p className="error">{err}</p>}
           </div>

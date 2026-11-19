@@ -24,6 +24,8 @@ These are enforced by the launchpad program, not by the website:
 | Parameter | Value on Acrux Net |
 |---|---|
 | Quote token | AXB (the faucet's demo token; Acrux Net has no wrapped ACRUX yet) |
+
+> **New launches are paused.** With the faucet closing, the launchpad is moving from pricing in AXB to real ACRUX. Coins already launched keep trading and can still graduate.
 | Total supply | 1,000,000,000 |
 | Sold on the curve | up to 800,000,000 |
 | Starting virtual reserves | 30 AXB : 1,073,000,000 tokens |
