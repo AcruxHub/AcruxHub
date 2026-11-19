@@ -113,7 +113,7 @@ textarea { resize: vertical; }
 .docs-nav { display: grid; gap: 2px; position: sticky; top: 12px; }
 .docs-nav a { color: var(--muted); padding: 7px 12px; border-radius: 8px; }
 .docs-nav a.on, .docs-nav a:hover { color: var(--text); background: var(--panel-2); }
-.docs-body { line-height: 1.65; overflow-wrap: anywhere; }
+.docs-body { line-height: 1.65; overflow-wrap: anywhere; min-width: 0; /* grid item: let it shrink so wide code blocks scroll inside it */ }
 .docs-body h1 { margin-top: 0; font-size: 26px; }
 .docs-body h2 { margin-top: 28px; font-size: 19px; }
 .docs-body code { background: var(--bg); padding: 1px 6px; border-radius: 6px; }
@@ -121,6 +121,11 @@ textarea { resize: vertical; }
 .docs-body pre code { padding: 0; }
 .docs-body blockquote { margin: 12px 0; padding: 8px 14px; border-left: 3px solid var(--warn); background: #2d261055; border-radius: 0 8px 8px 0; }
 .docs-body table { display: block; overflow-x: auto; }
+/* Table cells wrap only between words, so a narrow phone column never splits a word
+   ("Sw/ap"); long addresses in code still break anywhere so tables fit the screen. */
+.docs-body table { max-width: 100%; }
+.docs-body th, .docs-body td { overflow-wrap: normal; word-break: normal; }
+.docs-body td code { overflow-wrap: anywhere; word-break: break-all; }
 @media (max-width: 760px) {
   .docs { grid-template-columns: 1fr; }
   .docs-nav { position: static; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
