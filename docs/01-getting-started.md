@@ -13,7 +13,7 @@ Click **Connect** at the top right. You have two choices:
 
 ## 2. Get test funds
 
-Open **Portfolio** and press **Get test funds**. Your address is copied and the Acrux faucet opens. Paste it there to receive **2 ACRUX** (for fees) plus **100 AXA** and **100 AXB** (demo tokens). The faucet allows 3 grants per address and 10 per IP address every 24 hours.
+Open **Portfolio** and press **Get test funds**. Your address is copied and the Acrux faucet opens. Paste it there to receive test **ACRUX** (for fees) plus **100 AXA** and **100 AXB** (demo tokens). Acrux sets the amounts and limits, and the faucet page shows the current ones for your address.
 
 ## 3. Use it
 
@@ -21,8 +21,7 @@ Open **Portfolio** and press **Get test funds**. Your address is copied and the 
 |---|---|
 | **Swap** | Trade tokens at the best price across AcruxHub and Raydium pools. Paste any token's address (CA) to find its pools. |
 | **Pools** | Create AcruxHub or Raydium pools and add or remove liquidity, no code needed. |
-| **Launch** | Create a coin in one step, or buy coins still on their bonding curve. |
-| **Pools** | Create pools and add or remove liquidity. |
+| **Launch** | Create a coin in one step, buy coins still on their bonding curve, and graduate finished ones into a Raydium pool or the AcruxHub DEX. |
 | **Explorer** | Live Acrux Net data: current window, proposers, slots, accounts, transactions. |
 | **Portfolio** | Your balances and liquidity positions. |
 | **Bridge** | Not live yet: see [Bridge](#Docs/bridge). |

@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { marked } from 'marked'
 
-const files = import.meta.glob('../../../docs/*.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+// docs/dev-*.md are notes for developers: on GitHub, not in the site's user docs.
+const files = import.meta.glob(['../../../docs/*.md', '!../../../docs/dev-*.md'], { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 
 type Page = { slug: string; title: string; html: string }
 

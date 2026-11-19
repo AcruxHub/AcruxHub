@@ -1,6 +1,6 @@
 # Contracts and addresses
 
-All live on **Acrux Net** (`https://rpc.acrux.computer`). Source: [github.com/acruxhub/acruxhub](https://github.com/acruxhub/acruxhub).
+All live on **Acrux Net** (`https://rpc.acrux.computer`). Source: [github.com/AcruxHub/AcruxHub](https://github.com/AcruxHub/AcruxHub).
 
 | Program | Address | Status |
 |---|---|---|

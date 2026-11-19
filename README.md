@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/acruxhub/acruxhub/actions/workflows/ci.yml"><img src="https://github.com/acruxhub/acruxhub/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/AcruxHub/AcruxHub/actions/workflows/ci.yml"><img src="https://github.com/AcruxHub/AcruxHub/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/network-Acrux%20Net-7cf3ff" alt="Acrux Net">
   <img src="https://img.shields.io/badge/audit-not%20yet%20audited-ff7a90" alt="Not yet audited">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">

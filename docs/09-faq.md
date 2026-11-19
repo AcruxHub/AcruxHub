@@ -22,4 +22,4 @@ Not through the launchpad mechanics. Supply is fixed, the creator gets no free t
 Phantom shows Solana's network, not Acrux. Check **Portfolio** on AcruxHub instead.
 
 **Where's the code?**
-[github.com/acruxhub/acruxhub](https://github.com/acruxhub/acruxhub)
+[github.com/AcruxHub/AcruxHub](https://github.com/AcruxHub/AcruxHub)

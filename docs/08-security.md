@@ -20,4 +20,4 @@
 
 ## Reporting a vulnerability
 
-Please report security issues privately through [GitHub's private vulnerability reporting](https://github.com/acruxhub/acruxhub/security/advisories/new), not in public issues.
+Please report security issues privately through [GitHub's private vulnerability reporting](https://github.com/AcruxHub/AcruxHub/security/advisories/new), not in public issues.
