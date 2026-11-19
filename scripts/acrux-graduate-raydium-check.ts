@@ -4,7 +4,8 @@
 // launch graduated, pool at the curve's final price, every LP token burned,
 // graduator left empty, and the caller charged only Raydium's fee + pool rent.
 //
-//   node --import tsx scripts/acrux-graduate-raydium-check.ts
+//   node --import tsx scripts/acrux-graduate-raydium-check.ts [--complete-only]
+//   (--complete-only stops before graduating, to test the site's Graduate button)
 import { readFileSync } from 'node:fs'
 import * as anchor from '@coral-xyz/anchor'
 import { ComputeBudgetProgram, Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js'
@@ -60,16 +61,20 @@ const curveTokens = getAssociatedTokenAddressSync(mint.publicKey, launch, true)
 const curveQuote = getAssociatedTokenAddressSync(quoteMint, launch, true)
 const created = await send(new Transaction().add(
   ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-  await lp.methods.createLaunch('Graduation Test', 'GRADT', 'https://acruxhub.com').accountsPartial({ creator: kp.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint }).instruction(),
+  await lp.methods.createLaunch(process.argv.includes('--complete-only') ? 'Graduation Test 2' : 'Graduation Test', process.argv.includes('--complete-only') ? 'GRAD2' : 'GRADT', 'https://acruxhub.com').accountsPartial({ creator: kp.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint }).instruction(),
   createAssociatedTokenAccountIdempotentInstruction(kp.publicKey, getAssociatedTokenAddressSync(quoteMint, fee, true), fee, quoteMint),
   await lp.methods.buy(new BN(buyRaw.toString()), new BN(q.tokensOut.toString())).accountsPartial({
     user: kp.publicKey, launch, mint: mint.publicKey, quoteMint, curveTokens, curveQuote,
     userTokens: getAssociatedTokenAddressSync(mint.publicKey, kp.publicKey), userQuote, feeQuote: getAssociatedTokenAddressSync(quoteMint, fee, true),
   }).instruction(),
 ), [kp, mint])
-console.log(`created GRADT ${mint.publicKey.toBase58()} and completed its curve | ${created.sig}`)
+console.log(`created test coin ${mint.publicKey.toBase58()} and completed its curve | ${created.sig}`)
 let l = await lp.account.launch.fetch(launch)
 check(l.complete && !l.graduated, 'launch is complete and not yet graduated')
+if (process.argv.includes('--complete-only')) {
+  console.log(`left complete for graduation from the site: #Launch/${launch.toBase58()}`)
+  process.exit(0)
+}
 
 // 2. Graduate it into Raydium.
 const s = stateOf(l)

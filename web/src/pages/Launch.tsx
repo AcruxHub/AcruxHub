@@ -3,6 +3,7 @@ import { Keypair, ComputeBudgetProgram, type PublicKey } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token'
 import {
   launchpadProgram, launchConfig, launchAddress, allAccounts, curveBuy, curveSell, curvePrice, curveProgress, stateOf, graduateAccounts, BN,
+  graduateRaydiumAccounts, loadCpmmFeeTiers, cpmmPoolAddresses, CPMM_POOL_SIZE, RAYDIUM_CPMM_ID,
   type CurveState,
 } from '@acruxhub/sdk'
 import { useWallet, readProvider } from '../wallet.tsx'
@@ -281,22 +282,9 @@ function Coin({ l, quoteMint, quoteSym, qd, onBack }: { l: LaunchRow; quoteMint:
 
       <div className="card">
         {a.graduated ? (
-          <p className="ok">Graduated: trading on the AcruxHub DEX with liquidity locked forever. Use the Swap tab. Pool {short(a.pool)}</p>
+          <GraduatedNote pool={a.pool} mint={a.mint} />
         ) : a.complete ? (
-          <Action
-            label="Graduate to DEX"
-            disabled={!w.publicKey}
-            run={async () => {
-              const lp = launchpadProgram(w.provider!)
-              const tx = await lp.methods.graduate()
-                .accountsPartial({ payer: w.publicKey!, ...graduateAccounts(a, quoteMint) })
-                .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
-                .transaction()
-              const sig = await w.send(tx)
-              w.bump()
-              return `Graduated. ${sig}`
-            }}
-          />
+          <GraduatePanel a={a} quoteMint={quoteMint} />
         ) : (
           <>
             <div className="row" style={{ marginBottom: 10 }}>
@@ -328,5 +316,104 @@ function Coin({ l, quoteMint, quoteSym, qd, onBack }: { l: LaunchRow; quoteMint:
         <small>Launch account <span className="mono">{launchAddress(a.mint).toBase58()}</span></small>
       </div>
     </div>
+  )
+}
+
+/** Which kind of pool a graduated coin went to, read from the pool account's owner. */
+function GraduatedNote({ pool, mint }: { pool: PublicKey; mint: PublicKey }) {
+  const w = useWallet()
+  const owner = useAsync(async () => (await w.conn.getAccountInfo(pool))?.owner ?? null, [pool.toBase58(), w.conn])
+  const venue = owner.data?.equals(RAYDIUM_CPMM_ID) ? 'a Raydium CPMM pool' : 'the AcruxHub DEX'
+  return (
+    <p className="ok">
+      Graduated: trading on {owner.loading ? 'its pool' : venue} with liquidity locked forever. Pool <span className="mono">{short(pool)}</span>.{' '}
+      <a href={`#Swap/${mint.toBase58()}`}>Trade it on Swap →</a>
+    </p>
+  )
+}
+
+/** A completed curve can graduate into either venue, once. */
+function GraduatePanel({ a, quoteMint }: { a: any; quoteMint: PublicKey }) {
+  const w = useWallet()
+  const [venue, setVenue] = useState<'raydium' | 'acruxhub'>('raydium')
+  const tiers = useAsync(() => loadCpmmFeeTiers(w.conn), [w.conn])
+  // The program refuses tiers over 1% or with pool creation disabled.
+  const allowed = (tiers.data ?? []).filter(t => !t.disableCreatePool && t.tradeFeeRate <= 10_000n)
+  const [tierIdx, setTierIdx] = useState('0')
+  const tier = allowed.find(t => String(t.index) === tierIdx) ?? allowed[0]
+  const rent = useAsync(async () => {
+    const sizes = [CPMM_POOL_SIZE, 4075, 165, 165, 82]
+    return (await Promise.all(sizes.map(n => w.conn.getMinimumBalanceForRentExemption(n)))).reduce((s, x) => s + BigInt(x), 0n)
+  }, [w.conn])
+  const acrux = useAsync(async () => (w.publicKey ? BigInt(await w.conn.getBalance(w.publicKey)) : null), [w.publicKey, w.conn, w.refreshKey])
+  // Raydium pool addresses are fixed per tier + pair, so someone may have made this one already.
+  const taken = useAsync(async () => {
+    if (!tier) return false
+    return !!(await w.conn.getAccountInfo(cpmmPoolAddresses(tier.address, a.mint, quoteMint).pool))
+  }, [tier?.address.toBase58(), a.mint.toBase58(), w.conn, w.refreshKey])
+  const cost = tier && rent.data != null ? tier.createPoolFee + rent.data : null
+  const short_ = acrux.data != null && cost != null && acrux.data < cost + 20_000_000n
+  const pctOf = (ppm: bigint) => `${(Number(ppm) / 10_000).toFixed(ppm % 100n ? 3 : 2)}%`
+
+  return (
+    <>
+      <h3 style={{ marginTop: 0 }}>Ready to graduate</h3>
+      <p className="muted" style={{ marginTop: 0 }}>
+        The curve is complete. Anyone can graduate it, once: all the raised quote and the matching tokens go into a pool at the curve's final price, every LP token is burned so the liquidity is locked forever, and leftover tokens are burned.
+      </p>
+      <div className="row" style={{ marginBottom: 10 }}>
+        <button className={venue === 'raydium' ? 'primary' : ''} onClick={() => setVenue('raydium')}>Raydium pool</button>
+        <button className={venue === 'acruxhub' ? 'primary' : ''} onClick={() => setVenue('acruxhub')}>AcruxHub DEX</button>
+      </div>
+      {venue === 'raydium' ? (
+        <>
+          <div className="field">
+            <label>Raydium fee tier</label>
+            <select value={tier ? String(tier.index) : ''} onChange={e => setTierIdx(e.target.value)} disabled={!allowed.length}>
+              {allowed.map(t => <option key={t.index} value={String(t.index)}>{pctOf(t.tradeFeeRate)} trade fee (tier {t.index})</option>)}
+            </select>
+          </div>
+          <dl className="kv">
+            <dt>You pay</dt><dd>{cost != null && tier ? `${fmt(cost, 9, 4)} ACRUX (${fmt(tier.createPoolFee, 9)} Raydium fee + pool rent)` : '–'}</dd>
+            {acrux.data != null && <><dt>Your ACRUX</dt><dd>{fmt(acrux.data, 9, 4)}</dd></>}
+          </dl>
+          {taken.data && <small className="error">A Raydium pool for this coin already exists on this tier, so graduation there would fail. Pick another tier, or graduate to the AcruxHub DEX.</small>}
+          {short_ && <small className="error">You need about {cost != null ? fmt(cost + 20_000_000n, 9, 3) : '0.21'} ACRUX for this.</small>}
+          <p className="muted" style={{ fontSize: 13 }}>Raydium pools use Raydium's own program, so Raydium-compatible tools can trade the coin too. About 16% of a Raydium pool's trading fee goes to Raydium.</p>
+          <Action
+            label="Graduate to Raydium"
+            disabled={!w.publicKey || !tier || !!taken.data || short_}
+            run={async () => {
+              const lp = launchpadProgram(w.provider!)
+              const tx = await lp.methods.graduateRaydium()
+                .accountsPartial({ payer: w.publicKey!, ...graduateRaydiumAccounts(a, quoteMint, tier!.address) })
+                .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
+                .transaction()
+              const sig = await w.send(tx)
+              w.bump()
+              return `Graduated into a Raydium pool. ${sig}`
+            }}
+          />
+        </>
+      ) : (
+        <>
+          <p className="muted" style={{ fontSize: 13 }}>An AcruxHub AMM pool with a 0.30% fee. You pay only the pool's rent, and every trading fee stays in the pool.</p>
+          <Action
+            label="Graduate to AcruxHub DEX"
+            disabled={!w.publicKey}
+            run={async () => {
+              const lp = launchpadProgram(w.provider!)
+              const tx = await lp.methods.graduate()
+                .accountsPartial({ payer: w.publicKey!, ...graduateAccounts(a, quoteMint) })
+                .preInstructions([ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 })])
+                .transaction()
+              const sig = await w.send(tx)
+              w.bump()
+              return `Graduated. ${sig}`
+            }}
+          />
+        </>
+      )}
+    </>
   )
 }

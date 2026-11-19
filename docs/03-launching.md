@@ -34,7 +34,7 @@ Price only rises as people buy and falls as they sell. The buy that crosses the 
 
 ## Graduation to the DEX
 
-Once 20 AXB is raised, trading on the curve stops and **anyone** can press **Graduate to DEX**. In one transaction the program:
+Once 20 AXB is raised, trading on the curve stops and **anyone** can graduate the coin from its page, choosing a **Raydium pool** or the **AcruxHub DEX**. Graduating to the AcruxHub DEX, in one transaction the program:
 
 1. Creates an AcruxHub AMM pool (0.30% fee) for the coin and the quote token.
 2. Deposits all the raised quote and the matching tokens **at the curve's final price**, so the pool opens exactly where the curve ended.
@@ -47,7 +47,7 @@ After that the coin trades on **Swap**.
 
 The launchpad can also graduate a coin into a **Raydium CPMM pool** instead (the `graduate_raydium` instruction). It works the same way: same amounts, the pool opens at the curve's final price, every LP token is burned and leftover tokens are burned. Whoever triggers it picks the Raydium fee tier (trade fee at most 1%) and pays Raydium's 0.15 ACRUX pool-creation fee plus the pool's rent, about 0.19 ACRUX in total.
 
-Either graduation can be used, but only once: whichever lands first graduates the coin. The site's button uses the AcruxHub pool for now; Raydium graduation is available to anyone calling the program directly (`graduateRaydiumAccounts()` in the SDK).
+Either graduation can be used, but only once: whichever lands first graduates the coin. On the coin page, pick **Raydium pool**, choose a fee tier and press **Graduate to Raydium**. The page shows the cost first, and warns you if a Raydium pool for the coin already exists on that tier (graduation there would fail, so pick another tier or the AcruxHub DEX).
 
 ## Metadata
 
