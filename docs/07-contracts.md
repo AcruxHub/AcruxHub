@@ -12,8 +12,9 @@ Swaps can also route through **Raydium CPMM** pools (`CPMMoo8L3F4NbTegBCKVNunggL
 
 | Account | Address |
 |---|---|
-| Upgrade authority and launchpad fee wallet | `qqMsXac73aoHZn2r6cYzsk543WsJYbD2jqRvzPoLY9a` |
-| Treasury (0.1% swap fee) | `AcXRKoSUCGACXU2ygruLFYMx26KdotYX9KHRcsNC2oBd` |
+| Upgrade authority and launchpad admin | `qqMsXac73aoHZn2r6cYzsk543WsJYbD2jqRvzPoLY9a` |
+| Treasury (0.1% swap fee and 1% launchpad fee) | `AcXRKoSUCGACXU2ygruLFYMx26KdotYX9KHRcsNC2oBd` |
+| AXA/AXB Raydium CPMM pool (1%) | `CgjXEPNasLSxZdAUZsazpBKXGV9fokZiYw9QRbfQpete` (created from the Pools page) |
 | AXA/AXB pool (0.30%) | `NwPYYN8Xey8afqbyejv7GvJaqK9AwAZtyFkSdGqLr4b` |
 | AXA/AXB Raydium CPMM pool (0.25%) | `Edc9VT8nxTDGRuH7o918wufHkSKdJHFLuX3oj3YYpJ7p` |
 | Launchpad quote token (AXB) | `28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td` |

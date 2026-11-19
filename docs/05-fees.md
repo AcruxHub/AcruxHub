@@ -4,7 +4,7 @@ These are the fees charged today, read straight from the code.
 
 | Where | Fee | Who receives it |
 |---|---|---|
-| Launchpad curve, buy and sell | **1%** | The AcruxHub fee wallet |
+| Launchpad curve, buy and sell | **1%** | The AcruxHub treasury |
 | Swap, AcruxHub pool | the pool's fee tier (0.05%, 0.30% or 1.00%) | **100% to that pool's liquidity providers** |
 | Swap, Raydium pool | the pool's Raydium fee tier (0.25% on the most common one) | Raydium's split: mostly the pool's liquidity providers, part to Raydium |
 | Swap through acruxhub.com, any pool | **0.1%** of what you pay | The AcruxHub treasury |
@@ -21,10 +21,7 @@ The site adds it to the swap transaction as a separate transfer, before the pool
 
 ## Fee wallets
 
-- Swap fees go to the AcruxHub treasury, `AcXRKoSUCGACXU2ygruLFYMx26KdotYX9KHRcsNC2oBd`.
-- Launchpad fees go to `qqMsXac73aoHZn2r6cYzsk543WsJYbD2jqRvzPoLY9a` on Acrux Net.
-
-They pay for running AcruxHub: hosting, storage and network fees.
+Swap fees and launchpad fees both go to the AcruxHub treasury, `AcXRKoSUCGACXU2ygruLFYMx26KdotYX9KHRcsNC2oBd`. They pay for running AcruxHub: hosting, storage and network fees.
 
 ## There is no AcruxHub token
 
