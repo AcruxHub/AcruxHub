@@ -257,11 +257,31 @@ async function onCallback(q: any) {
 
 /**
  * One-time setup and status, run from Vercel (some networks can't reach the Bot API):
- * GET /api/telegram?op=setup|status with header x-setup-secret = the webhook secret.
+ * GET /api/telegram?op=setup|status|portal with header x-setup-secret = the webhook secret.
  * setup points the webhook here and sets the command menu and the Mini App menu button.
  */
 async function setup(op: string, host: string) {
   if (op === 'status') return { me: await tg('getMe', {}), webhook: await tg('getWebhookInfo', {}) }
+  if (op === 'portal') {
+    // The portal channel's pinned post: only a bot can put a button on a channel post.
+    const sent = await tg('sendPhoto', {
+      chat_id: '@AcruxHubPortal',
+      photo: 'https://xbj4dqltluuvxcew.public.blob.vercel-storage.com/images/59f6bc5dc5d62d07c5a9daebd0650b81e15c16ea78ee8967cad4e658a1ff5528.png',
+      caption: [
+        '<b>Welcome to AcruxHub</b>',
+        'The launchpad and DEX on Acrux.',
+        '',
+        'Tap below to verify you\'re human and get your invite to the community.',
+        '',
+        '🌐 acruxhub.com · 𝕏 @AcruxHub',
+        '⚠️ Admins will never DM you first or ask for your keys or seed phrase.',
+      ].join('\n'),
+      parse_mode: 'HTML',
+      reply_markup: { inline_keyboard: [[{ text: '✅ Tap to verify', url: `https://t.me/${BOT}?start=verify` }]] },
+    })
+    if (sent?.message_id) await tg('pinChatMessage', { chat_id: '@AcruxHubPortal', message_id: sent.message_id, disable_notification: true })
+    return { posted: sent?.message_id ?? null }
+  }
   if (op === 'setup') {
     return {
       webhook: await tg('setWebhook', { url: `https://${host}/api/telegram`, secret_token: SECRET, allowed_updates: ['message', 'callback_query', 'my_chat_member'], drop_pending_updates: true }),
