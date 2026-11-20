@@ -36,6 +36,9 @@ pub const PAIR_SEED: &[u8] = b"pair";
 pub const PAUSE_SEED: &[u8] = b"pause";
 /// A key the admin lets approve or disable pairs, and nothing else (e.g. a bot).
 pub const PAIR_APPROVER_SEED: &[u8] = b"pair_approver";
+/// Trading-fee discounts for holders of the platform token (absent = no discounts).
+pub const HOLDER_TIERS_SEED: &[u8] = b"holder_tiers";
+pub const MAX_HOLDER_TIERS: usize = 4;
 
 #[program]
 pub mod acruxhub_launchpad {
@@ -127,6 +130,25 @@ pub mod acruxhub_launchpad {
         Ok(())
     }
 
+    /// Sets the platform token and the fee discounts its holders get on curve trades:
+    /// hold at least `min_balance` (raw units) for `discount_bps` off the trade fee.
+    /// The biggest tier a holder qualifies for applies. All-zero tiers turn it off.
+    pub fn set_holder_tiers(ctx: Context<SetHolderTiers>, tiers: [HolderTier; MAX_HOLDER_TIERS]) -> Result<()> {
+        let mut last = HolderTier::default();
+        for t in tiers.iter().filter(|t| t.min_balance > 0) {
+            require!(t.discount_bps <= 10_000, LaunchError::BadConfig);
+            // Ascending: a bigger holding never gets a smaller discount.
+            require!(t.min_balance > last.min_balance && t.discount_bps >= last.discount_bps, LaunchError::BadConfig);
+            last = *t;
+        }
+        let h = &mut ctx.accounts.holder_tiers;
+        h.mint = ctx.accounts.holder_mint.key();
+        h.tiers = tiers;
+        h.bump = ctx.bumps.holder_tiers;
+        emit!(HolderTiersSet { mint: h.mint });
+        Ok(())
+    }
+
     /// Creates a token and its curve. The creator gets nothing up front; buying is
     /// the only way to hold the token, on the same terms for everyone.
     pub fn create_launch(ctx: Context<CreateLaunch>, name: String, symbol: String, uri: String) -> Result<()> {
@@ -211,7 +233,7 @@ pub mod acruxhub_launchpad {
     pub fn buy(ctx: Context<Trade>, quote_in: u64, min_tokens_out: u64) -> Result<()> {
         check_not_paused(&ctx.accounts.pause)?;
         require!(!ctx.accounts.launch.complete, LaunchError::Complete);
-        let q = curve::buy(&ctx.accounts.launch.state(), quote_in)?;
+        let q = curve::buy(&discounted_state(&ctx.accounts)?, quote_in)?;
         require!(q.tokens_out >= min_tokens_out && q.tokens_out > 0, LaunchError::Slippage);
 
         let a = &ctx.accounts;
@@ -244,7 +266,7 @@ pub mod acruxhub_launchpad {
     pub fn sell(ctx: Context<Trade>, tokens_in: u64, min_quote_out: u64) -> Result<()> {
         check_not_paused(&ctx.accounts.pause)?;
         require!(!ctx.accounts.launch.complete, LaunchError::Complete);
-        let q = curve::sell(&ctx.accounts.launch.state(), tokens_in)?;
+        let q = curve::sell(&discounted_state(&ctx.accounts)?, tokens_in)?;
         require!(q.quote_to_user >= min_quote_out && q.quote_to_user > 0, LaunchError::Slippage);
 
         let a = &ctx.accounts;
@@ -521,6 +543,29 @@ fn check_not_paused(pause: &AccountInfo) -> Result<()> {
     Ok(())
 }
 
+/// The launch's curve state with the trader's holder discount applied to its fee.
+fn discounted_state(a: &Trade) -> Result<curve::CurveState> {
+    let mut s = a.launch.state();
+    let off = holder_discount_bps(&a.holder_tiers, a.holder_tokens.as_deref(), &a.user.key())?;
+    s.fee_bps = (s.fee_bps as u32 * (10_000 - off as u32) / 10_000) as u16;
+    Ok(s)
+}
+
+/// The discount (bps off the trade fee) the trader's platform-token balance earns.
+/// No tiers set, no holder account, or someone else's account: no discount.
+fn holder_discount_bps(tiers: &AccountInfo, holder: Option<&Account<TokenAccount>>, user: &Pubkey) -> Result<u16> {
+    if tiers.data_is_empty() {
+        return Ok(0);
+    }
+    require_keys_eq!(*tiers.owner, crate::ID, LaunchError::Unauthorized);
+    let t = HolderTiers::try_deserialize(&mut &tiers.try_borrow_data()?[..])?;
+    let Some(h) = holder else { return Ok(0) };
+    if h.owner != *user || h.mint != t.mint {
+        return Ok(0);
+    }
+    Ok(t.tiers.iter().filter(|x| x.min_balance > 0 && h.amount >= x.min_balance).map(|x| x.discount_bps).max().unwrap_or(0))
+}
+
 fn token_balance(info: &AccountInfo) -> Result<u64> {
     let data = info.try_borrow_data()?;
     Ok(TokenAccount::try_deserialize(&mut &data[..])?.amount)
@@ -594,6 +639,22 @@ pub struct QuotePair {
 #[derive(InitSpace)]
 pub struct PairApprover {
     pub key: Pubkey,
+    pub bump: u8,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
+pub struct HolderTier {
+    /// Minimum platform-token balance, raw units. 0 = unused slot.
+    pub min_balance: u64,
+    /// Off the trade fee, in bps of the fee (5,000 = half the fee).
+    pub discount_bps: u16,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct HolderTiers {
+    pub mint: Pubkey,
+    pub tiers: [HolderTier; MAX_HOLDER_TIERS],
     pub bump: u8,
 }
 
@@ -700,6 +761,18 @@ pub struct SetPairApprover<'info> {
 }
 
 #[derive(Accounts)]
+pub struct SetHolderTiers<'info> {
+    #[account(mut)]
+    pub admin: Signer<'info>,
+    #[account(seeds = [CONFIG_SEED], bump = config.bump, has_one = admin @ LaunchError::Unauthorized)]
+    pub config: Account<'info, Config>,
+    pub holder_mint: Account<'info, Mint>,
+    #[account(init_if_needed, payer = admin, space = 8 + HolderTiers::INIT_SPACE, seeds = [HOLDER_TIERS_SEED], bump)]
+    pub holder_tiers: Account<'info, HolderTiers>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct SetPaused<'info> {
     #[account(mut)]
     pub admin: Signer<'info>,
@@ -776,6 +849,12 @@ pub struct Trade<'info> {
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
+    /// CHECK: the holder-tiers PDA; read by holder_discount_bps (may not exist).
+    #[account(seeds = [HOLDER_TIERS_SEED], bump)]
+    pub holder_tiers: UncheckedAccount<'info>,
+    /// The trader's platform-token account, for the holder discount. Optional; no
+    /// seeds so clients that leave it out get None.
+    pub holder_tokens: Option<Box<Account<'info, TokenAccount>>>,
 }
 
 #[derive(Accounts)]
@@ -905,6 +984,11 @@ pub struct PairSet {
 #[event]
 pub struct PairApproverSet {
     pub approver: Pubkey,
+}
+
+#[event]
+pub struct HolderTiersSet {
+    pub mint: Pubkey,
 }
 
 #[event]

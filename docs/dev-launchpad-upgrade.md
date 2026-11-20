@@ -50,11 +50,15 @@ for a default-quote launch.
 ## Going live, in order
 
 1. Fund the deployer with real ACRUX (the bridge must accept deposits first).
-2. Upgrade in place: the new binary is 608,560 bytes vs 540,952 live, so the
-   program account is extended by about 68 KB first (rent, kept) and the upgrade
-   buffer needs about 4.2 ACRUX while it's written (refunded).
-3. Nothing to redeploy: the site reads the program data size and switches to the
-   upgraded IDL by itself (web/src/launchpad.ts). Hard-refresh to check.
+2. **Deploy the site first** (`scripts/deploy-web.sh`). It picks the IDL by program
+   size (`UPGRADED_BYTES` = 633,168 in web/src/launchpad.ts), so until the upgrade
+   lands it keeps using the live v1. An older site build would mistake the new
+   program for the 608,560-byte one and send too few accounts, so it must not be
+   live when the program upgrades.
+3. Upgrade in place: the new binary is 633,168 bytes vs 540,952 live, so the
+   program account is extended by about 92 KB first (rent, kept) and the upgrade
+   buffer needs about 4.4 ACRUX while it's written (refunded). The site switches
+   to the upgraded IDL by itself; hard-refresh to check.
 4. When Acrux has a wrapped ACRUX mint:
    `node --import tsx scripts/acrux-launchpad-set-quote.ts <wrapped ACRUX mint> --yes`
 5. Optionally approve more pairs:
@@ -65,6 +69,28 @@ for a default-quote launch.
    then set the GitHub secret `PAIR_APPROVER_KEY` and variable `PAIR_KEEPER_ENABLED=true`.
    Tune the liquidity lines once real prices are known (they're in whole quote tokens).
 7. Reopen launches: set `LAUNCHES_PAUSED = null` in `web/src/net.ts` and deploy the site.
+8. Relaunch $HUB first, with the prepared metadata (AcruxHub pfp, tiers in the
+   description):
+   `https://xbj4dqltluuvxcew.public.blob.vercel-storage.com/metadata/0d4e01cf3e0d0e7834529086d5694d673ef244588b7edfc7cd77dac8f1e90631.json`
+9. Holder tiers, once $HUB exists (defaults 1M / 5M / 10M HUB for 25 / 50 / 75% off):
+   `node --import tsx scripts/acrux-launchpad-admin.ts tiers <HUB mint> --yes`
+   Curve trades get the discount on chain; the site applies the same tiers to
+   its 0.1% swap fee.
+10. Fees to holders: from this machine (treasury key, never GitHub), after HUB has
+    a Raydium pool:
+    `node --import tsx scripts/hub-buyback.ts <HUB mint> <quote mint> [--reserve N] [--buyback 50]`
+    dry-runs; add `--yes` to buy back and burn HUB and to add liquidity and burn the LP.
+
+## Holder tiers
+
+`set_holder_tiers` (admin only) stores up to 4 ascending tiers in the
+`holder_tiers` PDA. `buy` and `sell` take two more accounts: the tiers PDA
+(auto-resolved) and `holder_tokens`, the trader's platform-token account
+(optional: pass `null` for none). The biggest tier the balance reaches cuts the
+trade fee by its percentage; someone else's account, the wrong mint, or no tiers
+set means no discount. All-zero tiers turn it off. A balance is read at trade
+time, so someone could buy HUB just to trade cheaper, but that costs them the
+HUB round trip.
 
 Emergency: `node --import tsx scripts/acrux-launchpad-admin.ts pause --yes`
 (and `unpause`). `status` shows the default quote, pause state and pairs.

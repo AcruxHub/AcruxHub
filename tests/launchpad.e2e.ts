@@ -64,7 +64,7 @@ test('Launchpad: init, launch, buy, sell, complete, graduate into a locked AMM p
   const lpB = launchpadProgram(providerFor(conn, buyer))
   const buyerQuote = await giveTokens(conn, devWallet, quoteMint, buyer.publicKey, 100_000_000_000n)
   const buyerTokens = getAssociatedTokenAddressSync(mint.publicKey, buyer.publicKey)
-  const tradeAccounts = { user: buyer.publicKey, launch: launchKey, mint: mint.publicKey, quoteMint, curveTokens: launch.curveTokens, curveQuote: launch.curveQuote, userTokens: buyerTokens, userQuote: buyerQuote, feeQuote: feeAta }
+  const tradeAccounts = { user: buyer.publicKey, launch: launchKey, mint: mint.publicKey, quoteMint, curveTokens: launch.curveTokens, curveQuote: launch.curveQuote, userTokens: buyerTokens, userQuote: buyerQuote, feeQuote: feeAta, holderTokens: null }
 
   const q1 = curveBuy(stateOf(launch), 5_000_000_000n)!
   await expectError(lpB.methods.buy(new BN('5000000000'), new BN((q1.tokensOut + 1n).toString())).accountsPartial(tradeAccounts).rpc(), 'Slippage')
@@ -197,7 +197,7 @@ test('Launchpad: set_quote moves new launches to a new quote; old launches keep 
   const buyerNew = await giveTokens(conn, devWallet, newQuote, buyer.publicKey, 100_000_000n)
   const oldTrade = {
     user: buyer.publicKey, launch: oldKey, mint: oldMint.publicKey, quoteMint: oldQuote, curveTokens: oldLaunch.curveTokens, curveQuote: oldLaunch.curveQuote,
-    userTokens: getAssociatedTokenAddressSync(oldMint.publicKey, buyer.publicKey), userQuote: buyerOld, feeQuote: feeOld,
+    userTokens: getAssociatedTokenAddressSync(oldMint.publicKey, buyer.publicKey), userQuote: buyerOld, feeQuote: feeOld, holderTokens: null,
   }
 
   // The old launch still trades in its own quote...
@@ -214,7 +214,7 @@ test('Launchpad: set_quote moves new launches to a new quote; old launches keep 
   const qn = curveBuy(stateOf(newLaunch), 1_000_000n)!
   await lpB.methods.buy(new BN('1000000'), new BN(qn.tokensOut.toString())).accountsPartial({
     user: buyer.publicKey, launch: newKey, mint: newMintKp.publicKey, quoteMint: newQuote, curveTokens: newLaunch.curveTokens, curveQuote: newLaunch.curveQuote,
-    userTokens: getAssociatedTokenAddressSync(newMintKp.publicKey, buyer.publicKey), userQuote: buyerNew, feeQuote: feeNew,
+    userTokens: getAssociatedTokenAddressSync(newMintKp.publicKey, buyer.publicKey), userQuote: buyerNew, feeQuote: feeNew, holderTokens: null,
   }).rpc()
   assert.equal(await balance(conn, newLaunch.curveQuote), qn.quoteToCurve)
 
@@ -300,7 +300,7 @@ test('Launchpad: approved pairs and the emergency pause', async () => {
   const buyerPair = await giveTokens(conn, devWallet, pairMint, buyer.publicKey, 100_000_000n)
   const trade = {
     user: buyer.publicKey, launch: pairedKey, mint: paired.publicKey, quoteMint: pairMint, curveTokens: pl.curveTokens, curveQuote: pl.curveQuote,
-    userTokens: getAssociatedTokenAddressSync(paired.publicKey, buyer.publicKey), userQuote: buyerPair, feeQuote: feePair,
+    userTokens: getAssociatedTokenAddressSync(paired.publicKey, buyer.publicKey), userQuote: buyerPair, feeQuote: feePair, holderTokens: null,
   }
   const q = curveBuy(stateOf(pl), 2_000_000n)!
   await lpB.methods.buy(new BN('2000000'), new BN(q.tokensOut.toString())).accountsPartial(trade).rpc()
@@ -429,4 +429,97 @@ test('Launchpad: pair approver role is limited, and the pair keeper approves by 
   assert.equal(pair.params.graduationQuote.toString(), expectedGrad.toString())
   assert.ok((pair.params.feeRecipient as PublicKey).equals(cfg.params.feeRecipient))
   assert.equal(await lp.account.quotePair.fetchNullable(launchPairAddress(frozenish)), null, 'freezable token not approved')
+})
+
+test('Launchpad: holder tiers discount the trade fee', async () => {
+  const conn = await waitForChain(CHAIN_B_RPC)
+  const lp = launchpadProgram(providerFor(conn, devWallet))
+  const { holderTiersAddress, holderStatus, discountedFeeBps } = await import('../sdk/src/programs.ts')
+  const cfg: any = await lp.account.config.fetch(launchConfig())
+  const quoteMint: PublicKey = cfg.quoteMint
+  const feeRecipient: PublicKey = cfg.params.feeRecipient
+  const feeAta = (await getOrCreateAssociatedTokenAccount(conn, devWallet, quoteMint, feeRecipient)).address
+  const hub = await newMint(conn, devWallet, 6) // stands in for $HUB
+  const T = (n: number) => new BN(n).mul(new BN(1_000_000))
+  const none = { minBalance: new BN(0), discountBps: 0 }
+
+  // Admin only, and tiers must ascend.
+  const stranger = await newUser(conn)
+  await expectError(
+    launchpadProgram(providerFor(conn, stranger)).methods.setHolderTiers([{ minBalance: T(100), discountBps: 2500 }, none, none, none])
+      .accountsPartial({ admin: stranger.publicKey, config: launchConfig(), holderMint: hub }).rpc(),
+    'Unauthorized',
+  )
+  await expectError(
+    lp.methods.setHolderTiers([{ minBalance: T(1000), discountBps: 5000 }, { minBalance: T(100), discountBps: 2500 }, none, none])
+      .accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), holderMint: hub }).rpc(),
+    'BadConfig',
+  )
+  await expectError(
+    lp.methods.setHolderTiers([{ minBalance: T(100), discountBps: 10_001 }, none, none, none])
+      .accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), holderMint: hub }).rpc(),
+    'BadConfig',
+  )
+  await lp.methods.setHolderTiers([{ minBalance: T(100), discountBps: 2500 }, { minBalance: T(1000), discountBps: 5000 }, none, none])
+    .accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), holderMint: hub }).rpc()
+  assert.ok(await conn.getAccountInfo(holderTiersAddress()))
+
+  // A fresh coin on the default quote.
+  const creator = await newUser(conn)
+  const mint = Keypair.generate()
+  await launchpadProgram(providerFor(conn, creator)).methods.createLaunch('Tier Test', 'TIER', 'https://example.invalid/t.json')
+    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint, quotePair: null })
+    .signers([mint]).rpc()
+  const key = launchAddress(mint.publicKey)
+
+  const small = await newUser(conn) // 150 HUB: tier 1, 25% off
+  const big = await newUser(conn) // 2,000 HUB: tier 2, 50% off
+  const smallHub = await giveTokens(conn, devWallet, hub, small.publicKey, 150_000_000n)
+  const bigHub = await giveTokens(conn, devWallet, hub, big.publicKey, 2_000_000_000n)
+  const smallQuote = await giveTokens(conn, devWallet, quoteMint, small.publicKey, 100_000_000_000n)
+  await giveTokens(conn, devWallet, quoteMint, big.publicKey, 100_000_000_000n)
+
+  const tradeFor = (u: Keypair, holderTokens: PublicKey | null) => ({
+    user: u.publicKey, launch: key, mint: mint.publicKey, quoteMint, curveTokens: null as any, curveQuote: null as any,
+    userTokens: getAssociatedTokenAddressSync(mint.publicKey, u.publicKey), userQuote: getAssociatedTokenAddressSync(quoteMint, u.publicKey),
+    feeQuote: feeAta, holderTokens,
+  })
+  /** Buys a fiftieth of the curve and returns [fee actually paid, the fee bps the SDK expected]. */
+  async function buy(u: Keypair, holderTokens: PublicKey | null, expectDiscount: number) {
+    const l = await lp.account.launch.fetch(key)
+    const s = stateOf(l)
+    const amt = BigInt(l.graduationQuote.toString()) / 50n // small enough that five buys never complete the curve
+    const q = curveBuy({ ...s, feeBps: discountedFeeBps(s.feeBps, expectDiscount) }, amt)!
+    const before = await balance(conn, feeAta)
+    await launchpadProgram(providerFor(conn, u)).methods.buy(new BN(amt.toString()), new BN(q.tokensOut.toString()))
+      .accountsPartial({ ...tradeFor(u, holderTokens), curveTokens: l.curveTokens, curveQuote: l.curveQuote }).rpc()
+    assert.equal((await balance(conn, feeAta)) - before, q.fee, `fee at ${expectDiscount / 100}% off`)
+    return q.fee
+  }
+
+  const full = await buy(small, null, 0) // no holder account: full fee
+  const tier1 = await buy(small, smallHub, 2500) // own 150 HUB: 25% off
+  const tier2 = await buy(big, bigHub, 5000) // own 2,000 HUB: 50% off
+  await buy(small, bigHub, 0) // someone else's HUB account: no discount
+  assert.ok(tier1 < full && tier2 < tier1, 'bigger holders pay less')
+
+  // The SDK reads the same tiers the program applies.
+  assert.equal((await holderStatus(conn, lp, small.publicKey)).discountBps, 2500)
+  assert.equal((await holderStatus(conn, lp, big.publicKey)).discountBps, 5000)
+  assert.equal((await holderStatus(conn, lp, stranger.publicKey)).account, null)
+
+  // Sells get the discount too.
+  const l = await lp.account.launch.fetch(key)
+  const held = await balance(conn, getAssociatedTokenAddressSync(mint.publicKey, big.publicKey))
+  const st = stateOf(l)
+  const sq = curveSell({ ...st, feeBps: discountedFeeBps(st.feeBps, 5000) }, held / 2n)!
+  const before = await balance(conn, feeAta)
+  await launchpadProgram(providerFor(conn, big)).methods.sell(new BN((held / 2n).toString()), new BN(sq.quoteOut.toString()))
+    .accountsPartial({ ...tradeFor(big, bigHub), curveTokens: l.curveTokens, curveQuote: l.curveQuote }).rpc()
+  assert.equal((await balance(conn, feeAta)) - before, sq.fee)
+
+  // Turning tiers off (all zero) ends every discount.
+  await lp.methods.setHolderTiers([none, none, none, none]).accountsPartial({ admin: devWallet.publicKey, config: launchConfig(), holderMint: hub }).rpc()
+  await buy(big, bigHub, 0)
+  void smallQuote
 })

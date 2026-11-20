@@ -27,7 +27,7 @@ const tx = new Transaction().add(
   ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
   await lp.methods.createLaunch(name, symbol, uri).accountsPartial({ creator: kp.publicKey, config: launchConfig(), mint: mint.publicKey, quoteMint, quotePair: null }).instruction(),
   createAssociatedTokenAccountIdempotentInstruction(kp.publicKey, getAssociatedTokenAddressSync(quoteMint, fee, true), fee, quoteMint),
-  await lp.methods.buy(new BN(buyRaw.toString()), new BN(q.tokensOut.toString())).accountsPartial({
+  await lp.methods.buy(new BN(buyRaw.toString()), new BN(q.tokensOut.toString())).accountsPartial({ holderTokens: null,
     user: kp.publicKey, launch, mint: mint.publicKey, quoteMint,
     curveTokens: getAssociatedTokenAddressSync(mint.publicKey, launch, true),
     curveQuote: getAssociatedTokenAddressSync(quoteMint, launch, true),

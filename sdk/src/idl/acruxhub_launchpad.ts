@@ -313,6 +313,38 @@ export type AcruxhubLaunchpad = {
         {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "holderTiers",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  95,
+                  116,
+                  105,
+                  101,
+                  114,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holderTokens",
+          "docs": [
+            "The trader's platform-token account, for the holder discount. Optional; no",
+            "seeds so clients that leave it out get None."
+          ],
+          "optional": true
         }
       ],
       "args": [
@@ -1533,6 +1565,38 @@ export type AcruxhubLaunchpad = {
         {
           "name": "systemProgram",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "holderTiers",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  95,
+                  116,
+                  105,
+                  101,
+                  114,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holderTokens",
+          "docs": [
+            "The trader's platform-token account, for the holder discount. Optional; no",
+            "seeds so clients that leave it out get None."
+          ],
+          "optional": true
         }
       ],
       "args": [
@@ -1543,6 +1607,99 @@ export type AcruxhubLaunchpad = {
         {
           "name": "minQuoteOut",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "setHolderTiers",
+      "docs": [
+        "Sets the platform token and the fee discounts its holders get on curve trades:",
+        "hold at least `min_balance` (raw units) for `discount_bps` off the trade fee.",
+        "The biggest tier a holder qualifies for applies. All-zero tiers turn it off."
+      ],
+      "discriminator": [
+        26,
+        0,
+        126,
+        27,
+        226,
+        228,
+        16,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holderMint"
+        },
+        {
+          "name": "holderTiers",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  95,
+                  116,
+                  105,
+                  101,
+                  114,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "systemProgram",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tiers",
+          "type": {
+            "array": [
+              {
+                "defined": {
+                  "name": "holderTier"
+                }
+              },
+              4
+            ]
+          }
         }
       ]
     },
@@ -1946,6 +2103,19 @@ export type AcruxhubLaunchpad = {
       ]
     },
     {
+      "name": "holderTiers",
+      "discriminator": [
+        42,
+        174,
+        219,
+        233,
+        237,
+        166,
+        252,
+        31
+      ]
+    },
+    {
       "name": "launch",
       "discriminator": [
         144,
@@ -2023,6 +2193,19 @@ export type AcruxhubLaunchpad = {
         197,
         159,
         134
+      ]
+    },
+    {
+      "name": "holderTiersSet",
+      "discriminator": [
+        211,
+        52,
+        95,
+        12,
+        127,
+        176,
+        13,
+        251
       ]
     },
     {
@@ -2322,6 +2505,69 @@ export type AcruxhubLaunchpad = {
           {
             "name": "createPoolFee",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "holderTier",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "minBalance",
+            "docs": [
+              "Minimum platform-token balance, raw units. 0 = unused slot."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "discountBps",
+            "docs": [
+              "Off the trade fee, in bps of the fee (5,000 = half the fee)."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "holderTiers",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "tiers",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "holderTier"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "holderTiersSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
           }
         ]
       }

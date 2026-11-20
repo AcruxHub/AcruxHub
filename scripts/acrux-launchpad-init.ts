@@ -55,7 +55,7 @@ const l = await lp.account.launch.fetch(launchKey)
 const q = curveBuy(stateOf(l), 1_000_000n)!
 const userTokens = getAssociatedTokenAddressSync(mint.publicKey, kp.publicKey)
 const buy = await lp.methods.buy(new BN(1_000_000), new BN(q.tokensOut.toString()))
-  .accountsPartial({
+  .accountsPartial({ holderTokens: null,
     user: kp.publicKey, launch: launchKey, mint: mint.publicKey, quoteMint: AXB, curveTokens: l.curveTokens, curveQuote: l.curveQuote,
     userTokens, userQuote: getAssociatedTokenAddressSync(AXB, kp.publicKey), feeQuote: getAssociatedTokenAddressSync(AXB, kp.publicKey),
   })

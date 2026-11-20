@@ -13,8 +13,12 @@ ours() {
   [ -f keys/dev-wallet.json ] || return 0
   local auth; auth=$(solana-keygen pubkey keys/dev-wallet.json)
   for p in amm launchpad; do
-    if [ -f "$DEPLOY/acruxhub_$p.so" ]; then
-      printf -- '--upgradeable-program %s %s %s ' "$(solana-keygen pubkey keys/acruxhub_$p-keypair.json)" "$DEPLOY/acruxhub_$p.so" "$auth"
+    # LAUNCHPAD_SO loads a different launchpad binary, e.g. the one live on Acrux
+    # (scripts/rehearse-go-live.sh starts from it and upgrades in place).
+    local so="$DEPLOY/acruxhub_$p.so"
+    [ "$p" = launchpad ] && [ -n "${LAUNCHPAD_SO:-}" ] && so="$LAUNCHPAD_SO"
+    if [ -f "$so" ]; then
+      printf -- '--upgradeable-program %s %s %s ' "$(solana-keygen pubkey keys/acruxhub_$p-keypair.json)" "$so" "$auth"
     fi
   done
 }

@@ -20,7 +20,7 @@ const newQuote = new PublicKey(args.find(a => !a.startsWith('--') && args[args.i
 const gradIdx = args.indexOf('--graduate')
 const yes = args.includes('--yes')
 
-const kp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync('keys/acrux-deployer.json', 'utf8'))))
+const kp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(process.env.KEY ?? 'keys/acrux-deployer.json', 'utf8'))))
 const conn = new Connection(RPC, 'confirmed')
 const lp = launchpadProgram(new anchor.AnchorProvider(conn, new anchor.Wallet(kp), { commitment: 'confirmed' }))
 const cfg: any = await lp.account.config.fetch(launchConfig())

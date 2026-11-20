@@ -3,7 +3,7 @@ import { Keypair, ComputeBudgetProgram, PublicKey, Transaction } from '@solana/w
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token'
 import {
   launchConfig, launchAddress, launchPairAddress, launchPauseAddress, allAccounts, curveBuy, curveSell, curveProgress, stateOf, graduateAccounts, BN,
-  graduateRaydiumAccounts, loadCpmmFeeTiers, cpmmPoolAddresses, CPMM_POOL_SIZE, RAYDIUM_CPMM_ID,
+  graduateRaydiumAccounts, loadCpmmFeeTiers, cpmmPoolAddresses, CPMM_POOL_SIZE, RAYDIUM_CPMM_ID, holderStatus, discountedFeeBps,
   type CurveState,
 } from '@acruxhub/sdk'
 import { useWallet, readProvider } from '../wallet.tsx'
@@ -395,7 +395,11 @@ function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: La
   const [amt, setAmt] = useState('')
   const [slip, setSlip] = useState(1)
   const raw = parseAmount(amt, side === 'buy' ? qd : TOKEN_DECIMALS)
-  const q = useMemo(() => (raw ? (side === 'buy' ? curveBuy(s, raw) : curveSell(s, raw)) : null), [raw, side, l])
+  // Platform-token holders pay a smaller trade fee (upgraded launchpad only).
+  const holder = useAsync(async () => (upgraded && w.publicKey ? holderStatus(w.conn, launchpadFor(w.provider ?? readProvider(w.conn), true), w.publicKey) : null), [upgraded, w.publicKey?.toBase58(), w.conn, w.refreshKey])
+  const discount = holder.data?.discountBps ?? 0
+  const sd = useMemo(() => ({ ...s, feeBps: discountedFeeBps(s.feeBps, discount) }), [s, discount])
+  const q = useMemo(() => (raw ? (side === 'buy' ? curveBuy(sd, raw) : curveSell(sd, raw)) : null), [raw, side, l, sd])
   const fee = a.feeRecipient as PublicKey
   const bal = useAsync(async () => {
     if (!w.publicKey) return null
@@ -413,6 +417,7 @@ function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: La
     userTokens: getAssociatedTokenAddressSync(a.mint, w.publicKey!),
     userQuote: getAssociatedTokenAddressSync(quoteMint, w.publicKey!),
     feeQuote: getAssociatedTokenAddressSync(quoteMint, fee, true),
+    ...(upgraded ? { holderTokens: holder.data?.account ?? null } : {}),
   })
   const pre = () => [
     createAssociatedTokenAccountIdempotentInstruction(w.publicKey!, getAssociatedTokenAddressSync(quoteMint, fee, true), fee, quoteMint),
@@ -440,6 +445,12 @@ function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: La
         <strong>{q ? ('tokensOut' in q ? `${fmt(q.tokensOut, TOKEN_DECIMALS, 2)} ${a.symbol}` : `${fmt(q.quoteOut, qd, 4)} ${quoteSym}`) : '–'}</strong>
       </div>
       {q && 'completes' in q && q.completes && <p className="ok" style={{ marginTop: -6 }}>This buy completes the curve.</p>}
+      <div className="quote-line" style={{ marginTop: -6 }}>
+        <span>Trade fee</span>
+        <span>{discount > 0
+          ? <><s className="faint">{s.feeBps / 100}%</s> <strong className="up">{sd.feeBps / 100}%</strong> <small className="muted">holder discount</small></>
+          : <>{s.feeBps / 100}%</>}</span>
+      </div>
       <div className="quote-line" style={{ marginTop: -6 }}>
         <span>Max slippage</span>
         <span className="seg" style={{ padding: 2 }}>{[0.5, 1, 3].map(v => <button key={v} className={slip === v ? 'on' : ''} style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setSlip(v)}>{v}%</button>)}</span>
@@ -691,6 +702,7 @@ function Create({ pairs, upgraded, onDone }: { pairs: Pair[]; upgraded: boolean;
                       userTokens: getAssociatedTokenAddressSync(mint.publicKey, w.publicKey!),
                       userQuote: getAssociatedTokenAddressSync(quoteMint, w.publicKey!),
                       feeQuote: getAssociatedTokenAddressSync(quoteMint, feeRecipient, true),
+                      ...(upgraded ? { holderTokens: null } : {}),
                     })
                     .instruction(),
                 ]

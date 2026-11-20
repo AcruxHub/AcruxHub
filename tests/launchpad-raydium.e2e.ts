@@ -51,7 +51,7 @@ test('Launchpad: graduate into a Raydium CPMM pool with the LP burned', async ()
   const lpB = launchpadProgram(providerFor(conn, buyer))
   const buyerQuote = await createWrappedNativeAccount(conn, buyer, buyer.publicKey, 80_000_000_000)
   const buyerTokens = getAssociatedTokenAddressSync(mint.publicKey, buyer.publicKey)
-  const trade = { user: buyer.publicKey, launch: launchKey, mint: mint.publicKey, quoteMint, curveTokens: launch.curveTokens, curveQuote: launch.curveQuote, userTokens: buyerTokens, userQuote: buyerQuote, feeQuote: feeAta }
+  const trade = { user: buyer.publicKey, launch: launchKey, mint: mint.publicKey, quoteMint, curveTokens: launch.curveTokens, curveQuote: launch.curveQuote, userTokens: buyerTokens, userQuote: buyerQuote, feeQuote: feeAta, holderTokens: null }
 
   // Not before the curve completes.
   await lpB.methods.buy(new BN('5000000000'), new BN(1)).accountsPartial(trade).rpc()
@@ -172,7 +172,7 @@ test('Launchpad: graduate_raydium refuses a fee tier over 1% and cannot be block
   const lpB = launchpadProgram(providerFor(conn, buyer))
   const buyerQuote = await createWrappedNativeAccount(conn, buyer, buyer.publicKey, 80_000_000_000)
   const buyerTokens = getAssociatedTokenAddressSync(mint.publicKey, buyer.publicKey)
-  const trade = { user: buyer.publicKey, launch: launchKey, mint: mint.publicKey, quoteMint, curveTokens: launch.curveTokens, curveQuote: launch.curveQuote, userTokens: buyerTokens, userQuote: buyerQuote, feeQuote: feeAta }
+  const trade = { user: buyer.publicKey, launch: launchKey, mint: mint.publicKey, quoteMint, curveTokens: launch.curveTokens, curveQuote: launch.curveQuote, userTokens: buyerTokens, userQuote: buyerQuote, feeQuote: feeAta, holderTokens: null }
   const big = curveBuy(stateOf(launch), 50_000_000_000n)!
   assert.ok(big.completes)
   await lpB.methods.buy(new BN('50000000000'), new BN(big.tokensOut.toString())).accountsPartial(trade).rpc()

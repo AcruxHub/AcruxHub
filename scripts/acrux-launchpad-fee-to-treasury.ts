@@ -95,7 +95,7 @@ const create = await lp.methods.createLaunch('FeeCheck', 'FEE', '')
   .instruction()
 async function simulateBuy(feeQuote: PublicKey) {
   const buy = await lp.methods.buy(new BN(quoteIn.toString()), new BN(q.tokensOut.toString()))
-    .accountsPartial({
+    .accountsPartial({ holderTokens: null,
       user: kp.publicKey, launch: launchKey, mint: mint.publicKey, quoteMint: AXB, curveTokens, curveQuote,
       userTokens: getAssociatedTokenAddressSync(mint.publicKey, kp.publicKey),
       userQuote: getAssociatedTokenAddressSync(AXB, kp.publicKey), feeQuote,

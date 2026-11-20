@@ -7,6 +7,12 @@
 //   node --import tsx scripts/acrux-launchpad-admin.ts unpair <quote mint> [--yes]
 //   node --import tsx scripts/acrux-launchpad-admin.ts pause|unpause [--yes]
 //   node --import tsx scripts/acrux-launchpad-admin.ts approver <address|none> [--yes]
+//   node --import tsx scripts/acrux-launchpad-admin.ts tiers <platform token mint> [--tiers 1000000:25,5000000:50,10000000:75] [--yes]
+//   node --import tsx scripts/acrux-launchpad-admin.ts tiers off [--yes]
+//
+// Holder tiers: hold at least N whole platform tokens for P% off the trade fee
+// (on chain for launchpad trades; the site applies the same tiers to its swap fee).
+// RPC and KEY env vars point it elsewhere, e.g. a local chain for a rehearsal.
 //
 // A new pair copies the default curve (supply, fee, fee recipient) with the quote
 // amounts rescaled to the pair token's decimals; --graduate / --virtual set them
@@ -15,14 +21,14 @@ import { readFileSync } from 'node:fs'
 import * as anchor from '@coral-xyz/anchor'
 import { Connection, Keypair, PublicKey, type Transaction } from '@solana/web3.js'
 import { getMint } from '@solana/spl-token'
-import { launchpadProgram, launchConfig, launchPairAddress, launchPauseAddress, allAccounts, BN } from '../sdk/src/index.ts'
+import { launchpadProgram, launchConfig, launchPairAddress, launchPauseAddress, allAccounts, BN, loadHolderTiers, holderTiersAddress } from '../sdk/src/index.ts'
 
 const RPC = process.env.RPC ?? 'https://rpc.acrux.computer'
 const [cmd, arg] = process.argv.slice(2).filter(a => !a.startsWith('--') && !/^[\d.]+$/.test(a))
 const flag = (name: string) => { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : undefined }
 const yes = process.argv.includes('--yes')
 
-const kp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync('keys/acrux-deployer.json', 'utf8'))))
+const kp = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(process.env.KEY ?? 'keys/acrux-deployer.json', 'utf8'))))
 const conn = new Connection(RPC, 'confirmed')
 const lp = launchpadProgram(new anchor.AnchorProvider(conn, new anchor.Wallet(kp), { commitment: 'confirmed' }))
 const cfg: any = await lp.account.config.fetch(launchConfig())
@@ -47,6 +53,12 @@ if (cmd === 'status' || !cmd) {
   for (const p of (await allAccounts<any>(lp, 'QuotePair')) as any[]) {
     const d = (await getMint(conn, p.account.mint)).decimals
     console.log(`pair ${p.account.mint.toBase58()} ${p.account.enabled ? 'enabled' : 'disabled'} · graduates at ${whole(p.account.params.graduationQuote, d)}`)
+  }
+  const t = await loadHolderTiers(conn, lp)
+  if (!t) console.log('holder tiers: none')
+  else {
+    const d = (await getMint(conn, t.mint)).decimals
+    console.log(`holder tiers on ${t.mint.toBase58()}: ${t.tiers.map(x => `${Number(x.minBalance) / 10 ** d}+ -> ${x.discountBps / 100}% off`).join(', ')}`)
   }
 } else if (cmd === 'pair' || cmd === 'unpair') {
   const mint = new PublicKey(arg ?? '')
@@ -73,6 +85,19 @@ if (cmd === 'status' || !cmd) {
   const key = arg === 'none' ? PublicKey.default : new PublicKey(arg ?? '')
   console.log(key.equals(PublicKey.default) ? 'revoke the pair approver' : `pair approver -> ${key.toBase58()} (may only approve/disable pairs; fees and supply forced to defaults)`)
   await send('set_pair_approver', await lp.methods.setPairApprover(key).accountsPartial({ admin: kp.publicKey, config: launchConfig() }).transaction())
+} else if (cmd === 'tiers') {
+  // Up to 4 tiers, ascending. "off" stores all-zero tiers: nobody gets a discount.
+  const off = arg === 'off'
+  const mint = off ? ((await loadHolderTiers(conn, lp))?.mint ?? cfg.quoteMint) : new PublicKey(arg ?? '')
+  const dec = (await getMint(conn, mint)).decimals
+  const spec = off ? [] : (flag('--tiers') ?? '1000000:25,5000000:50,10000000:75').split(',').map(x => x.split(':').map(Number))
+  if (spec.length > 4) throw new Error('at most 4 tiers')
+  const tiers = Array.from({ length: 4 }, (_, i) => spec[i]
+    ? { minBalance: new BN((BigInt(Math.round(spec[i][0])) * 10n ** BigInt(dec)).toString()), discountBps: Math.round(spec[i][1] * 100) }
+    : { minBalance: new BN(0), discountBps: 0 })
+  console.log(off ? 'turn holder discounts off' : `holder tiers on ${mint.toBase58()}: ${spec.map(([n, p]) => `hold ${n.toLocaleString()}+ -> ${p}% off the trade fee`).join(' · ')}`)
+  console.log(`account ${holderTiersAddress().toBase58()}`)
+  await send('set_holder_tiers', await lp.methods.setHolderTiers(tiers).accountsPartial({ admin: kp.publicKey, config: launchConfig(), holderMint: mint }).transaction())
 } else {
   throw new Error(`unknown command ${cmd}`)
 }

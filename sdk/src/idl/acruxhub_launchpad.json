@@ -307,6 +307,38 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "holder_tiers",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  95,
+                  116,
+                  105,
+                  101,
+                  114,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_tokens",
+          "docs": [
+            "The trader's platform-token account, for the holder discount. Optional; no",
+            "seeds so clients that leave it out get None."
+          ],
+          "optional": true
         }
       ],
       "args": [
@@ -1527,6 +1559,38 @@
         {
           "name": "system_program",
           "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "holder_tiers",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  95,
+                  116,
+                  105,
+                  101,
+                  114,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_tokens",
+          "docs": [
+            "The trader's platform-token account, for the holder discount. Optional; no",
+            "seeds so clients that leave it out get None."
+          ],
+          "optional": true
         }
       ],
       "args": [
@@ -1537,6 +1601,99 @@
         {
           "name": "min_quote_out",
           "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "set_holder_tiers",
+      "docs": [
+        "Sets the platform token and the fee discounts its holders get on curve trades:",
+        "hold at least `min_balance` (raw units) for `discount_bps` off the trade fee.",
+        "The biggest tier a holder qualifies for applies. All-zero tiers turn it off."
+      ],
+      "discriminator": [
+        26,
+        0,
+        126,
+        27,
+        226,
+        228,
+        16,
+        177
+      ],
+      "accounts": [
+        {
+          "name": "admin",
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "config"
+          ]
+        },
+        {
+          "name": "config",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "holder_mint"
+        },
+        {
+          "name": "holder_tiers",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  104,
+                  111,
+                  108,
+                  100,
+                  101,
+                  114,
+                  95,
+                  116,
+                  105,
+                  101,
+                  114,
+                  115
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "tiers",
+          "type": {
+            "array": [
+              {
+                "defined": {
+                  "name": "HolderTier"
+                }
+              },
+              4
+            ]
+          }
         }
       ]
     },
@@ -1940,6 +2097,19 @@
       ]
     },
     {
+      "name": "HolderTiers",
+      "discriminator": [
+        42,
+        174,
+        219,
+        233,
+        237,
+        166,
+        252,
+        31
+      ]
+    },
+    {
       "name": "Launch",
       "discriminator": [
         144,
@@ -2017,6 +2187,19 @@
         197,
         159,
         134
+      ]
+    },
+    {
+      "name": "HolderTiersSet",
+      "discriminator": [
+        211,
+        52,
+        95,
+        12,
+        127,
+        176,
+        13,
+        251
       ]
     },
     {
@@ -2316,6 +2499,69 @@
           {
             "name": "create_pool_fee",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HolderTier",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "min_balance",
+            "docs": [
+              "Minimum platform-token balance, raw units. 0 = unused slot."
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "discount_bps",
+            "docs": [
+              "Off the trade fee, in bps of the fee (5,000 = half the fee)."
+            ],
+            "type": "u16"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HolderTiers",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
+          },
+          {
+            "name": "tiers",
+            "type": {
+              "array": [
+                {
+                  "defined": {
+                    "name": "HolderTier"
+                  }
+                },
+                4
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "HolderTiersSet",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "mint",
+            "type": "pubkey"
           }
         ]
       }

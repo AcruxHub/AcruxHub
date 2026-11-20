@@ -11,7 +11,7 @@ import type { Network } from './net.ts'
 /** The launchpad's program data account (holds the deployed binary). */
 const PROGRAM_DATA = new PublicKey('JGZFP11vsgFPoQJAvYDfzE8LF9NeVFMfa2tJSozs5CE')
 /** Size of the upgraded build; anything smaller is the live v1. */
-export const UPGRADED_BYTES = 608_560
+export const UPGRADED_BYTES = 633_168
 
 const cache = new Map<string, Promise<boolean>>()
 

@@ -3,7 +3,7 @@
 
 import * as anchor from '@coral-xyz/anchor'
 import { Program, type Provider } from '@coral-xyz/anchor'
-import { PublicKey } from '@solana/web3.js'
+import { PublicKey, type Connection } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import ammIdl from './idl/acruxhub_amm.json' with { type: 'json' }
 import launchpadIdl from './idl/acruxhub_launchpad.json' with { type: 'json' }
@@ -99,6 +99,42 @@ export const launchAddress = (mint: PublicKey) => pda([enc('launch'), mint.toByt
 export const launchPairAddress = (quoteMint: PublicKey) => pda([enc('pair'), quoteMint.toBytes()], LAUNCHPAD_ID)
 /** The launchpad's emergency pause switch (absent until first set = not paused). */
 export const launchPauseAddress = () => pda([enc('pause')], LAUNCHPAD_ID)
+
+// ---- Holder tiers: trading-fee discounts for holders of the platform token ----
+export const holderTiersAddress = () => pda([enc('holder_tiers')], LAUNCHPAD_ID)
+export type HolderTiersInfo = { mint: PublicKey; tiers: { minBalance: bigint; discountBps: number }[] }
+
+/** The holder tiers set on chain, smallest first, or null when none are set. */
+export async function loadHolderTiers(conn: Connection, program: Program<any>): Promise<HolderTiersInfo | null> {
+  const info = await conn.getAccountInfo(holderTiersAddress())
+  if (!info || !info.owner.equals(LAUNCHPAD_ID)) return null
+  const d: any = program.coder.accounts.decode('holderTiers', info.data)
+  const tiers = (d.tiers as any[])
+    .map(t => ({ minBalance: BigInt(t.minBalance.toString()), discountBps: Number(t.discountBps) }))
+    .filter(t => t.minBalance > 0n)
+  return tiers.length ? { mint: d.mint, tiers } : null
+}
+
+/** Discount (bps off the trade fee) a balance earns: the biggest tier it reaches. */
+export function holderDiscountBps(t: HolderTiersInfo | null, balance: bigint): number {
+  return Math.max(0, ...(t?.tiers ?? []).filter(x => balance >= x.minBalance).map(x => x.discountBps))
+}
+
+/** The fee after a discount, rounded like the program does. */
+export const discountedFeeBps = (feeBps: number, discountBps: number) => Math.floor((feeBps * (10_000 - discountBps)) / 10_000)
+
+/**
+ * What a trader passes as `holderTokens` and the discount it earns. The account is
+ * null unless it exists and earns a discount (the program also accepts null).
+ */
+export async function holderStatus(conn: Connection, program: Program<any>, user: PublicKey) {
+  const tiers = await loadHolderTiers(conn, program)
+  if (!tiers) return { tiers, account: null as PublicKey | null, balance: 0n, discountBps: 0 }
+  const ata = getAssociatedTokenAddressSync(tiers.mint, user)
+  const bal = await conn.getTokenAccountBalance(ata).then(r => BigInt(r.value.amount)).catch(() => 0n)
+  const discountBps = holderDiscountBps(tiers, bal)
+  return { tiers, account: discountBps > 0 ? ata : null, balance: bal, discountBps }
+}
 
 export type CurveState = { virtualQuote: bigint; virtualTokens: bigint; realQuote: bigint; realTokens: bigint; graduationQuote: bigint; feeBps: number }
 
