@@ -448,7 +448,7 @@ function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: La
       <div className="quote-line" style={{ marginTop: -6 }}>
         <span>Trade fee</span>
         <span>{discount > 0
-          ? <><s className="faint">{s.feeBps / 100}%</s> <strong className="up">{sd.feeBps / 100}%</strong> <small className="muted">holder discount</small></>
+          ? <><s className="faint">{s.feeBps / 100}%</s> <strong className="up">{sd.feeBps / 100}%</strong> <small className="muted">{holder.data?.tierName ?? 'holder'} tier</small></>
           : <>{s.feeBps / 100}%</>}</span>
       </div>
       <div className="quote-line" style={{ marginTop: -6 }}>

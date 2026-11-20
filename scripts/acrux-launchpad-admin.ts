@@ -7,10 +7,11 @@
 //   node --import tsx scripts/acrux-launchpad-admin.ts unpair <quote mint> [--yes]
 //   node --import tsx scripts/acrux-launchpad-admin.ts pause|unpause [--yes]
 //   node --import tsx scripts/acrux-launchpad-admin.ts approver <address|none> [--yes]
-//   node --import tsx scripts/acrux-launchpad-admin.ts tiers <platform token mint> [--tiers 1000000:25,5000000:50,10000000:75] [--yes]
+//   node --import tsx scripts/acrux-launchpad-admin.ts tiers <platform token mint> [--tiers 10000:33.34,100000:66.67,1000000:100] [--yes]
 //   node --import tsx scripts/acrux-launchpad-admin.ts tiers off [--yes]
 //
-// Holder tiers: hold at least N whole platform tokens for P% off the trade fee
+// Holder tiers: hold at least N whole platform tokens for P% off the trade fee.
+// Defaults: Bronze 10k, Silver 100k, Gold 1M HUB = a third, two thirds, all of the fee off.
 // (on chain for launchpad trades; the site applies the same tiers to its swap fee).
 // RPC and KEY env vars point it elsewhere, e.g. a local chain for a rehearsal.
 //
@@ -90,7 +91,7 @@ if (cmd === 'status' || !cmd) {
   const off = arg === 'off'
   const mint = off ? ((await loadHolderTiers(conn, lp))?.mint ?? cfg.quoteMint) : new PublicKey(arg ?? '')
   const dec = (await getMint(conn, mint)).decimals
-  const spec = off ? [] : (flag('--tiers') ?? '1000000:25,5000000:50,10000000:75').split(',').map(x => x.split(':').map(Number))
+  const spec = off ? [] : (flag('--tiers') ?? '10000:33.34,100000:66.67,1000000:100').split(',').map(x => x.split(':').map(Number))
   if (spec.length > 4) throw new Error('at most 4 tiers')
   const tiers = Array.from({ length: 4 }, (_, i) => spec[i]
     ? { minBalance: new BN((BigInt(Math.round(spec[i][0])) * 10n ** BigInt(dec)).toString()), discountBps: Math.round(spec[i][1] * 100) }

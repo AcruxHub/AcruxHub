@@ -158,7 +158,7 @@ export function Swap() {
               <dt>Route</dt><dd>{best ? <>{marketName(best.m)} <span className="muted">{pct(best.m.feePpm)}</span></> : '–'}</dd>
               <dt>Price impact</dt><dd>{best ? (impactBps / 100).toFixed(2) + '%' : '–'}</dd>
               <dt>Min received</dt><dd>{best ? fmt(minOut(best.out, slipBps), outDec) : '–'}</dd>
-              {feeTo && <><dt>AcruxHub fee</dt><dd>{split ? `${fmt(split.fee, inDec)} ${label(inMint)}` : `${feeBps / 100}%`}{discount > 0 && <small className="up"> holder discount {discount / 100}%</small>}</dd></>}
+              {feeTo && <><dt>AcruxHub fee</dt><dd>{split ? `${fmt(split.fee, inDec)} ${label(inMint)}` : `${feeBps / 100}%`}{discount > 0 && <small className="up"> {holder.data?.tierName ?? 'holder'} tier, {discount / 100}% off</small>}</dd></>}
               <dt>Send</dt><dd>{w.privateMode ? <span className="pill good">private</span> : <span className="pill">public</span>}</dd>
             </dl>
           </div>

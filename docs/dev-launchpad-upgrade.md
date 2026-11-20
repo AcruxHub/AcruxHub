@@ -71,8 +71,9 @@ for a default-quote launch.
 7. Reopen launches: set `LAUNCHES_PAUSED = null` in `web/src/net.ts` and deploy the site.
 8. Relaunch $HUB first, with the prepared metadata (AcruxHub pfp, tiers in the
    description):
-   `https://xbj4dqltluuvxcew.public.blob.vercel-storage.com/metadata/0d4e01cf3e0d0e7834529086d5694d673ef244588b7edfc7cd77dac8f1e90631.json`
-9. Holder tiers, once $HUB exists (defaults 1M / 5M / 10M HUB for 25 / 50 / 75% off):
+   `https://xbj4dqltluuvxcew.public.blob.vercel-storage.com/metadata/c0d2f163ffde5f0b8992d3e808e0aa283052ee8ba0f224799863ba7b9fefaec6.json`
+9. Holder tiers, once $HUB exists (defaults: Bronze 10K HUB a third off, Silver
+   100K two thirds off, Gold 1M no fee, the same ladder as 9/6/3/0%):
    `node --import tsx scripts/acrux-launchpad-admin.ts tiers <HUB mint> --yes`
    Curve trades get the discount on chain; the site applies the same tiers to
    its 0.1% swap fee.

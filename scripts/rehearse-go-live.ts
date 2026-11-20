@@ -26,7 +26,7 @@ const STATE = '.tmp/rehearsal.json'
 const LOADER = new PublicKey('BPFLoaderUpgradeab1e11111111111111111111111')
 const programData = PublicKey.findProgramAddressSync([LAUNCHPAD_ID.toBytes()], LOADER)[0]
 const AMM_CONFIG = new PublicKey('D4FPEruKEHrG5TenZ2mpDGEfu1iUvTiqBxvpU8HLBvC2') // Raydium 0.25% tier, cloned
-const HUB_URI = 'https://xbj4dqltluuvxcew.public.blob.vercel-storage.com/metadata/0d4e01cf3e0d0e7834529086d5694d673ef244588b7edfc7cd77dac8f1e90631.json'
+const HUB_URI = 'https://xbj4dqltluuvxcew.public.blob.vercel-storage.com/metadata/c0d2f163ffde5f0b8992d3e808e0aa283052ee8ba0f224799863ba7b9fefaec6.json'
 const treasury = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync('keys/local-treasury.json', 'utf8'))))
 const cu = ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 })
 const ok = (m: string) => console.log(`  ✔ ${m}`)
@@ -117,7 +117,7 @@ if (phase === '1') {
   const firstBuy = BigInt(hl.graduationQuote.toString()) / 4n
   await launchpadProgram(providerFor(conn, whale)).methods.buy(new BN(firstBuy.toString()), new BN(1)).accountsPartial(hubTrade(whale, whaleQuote, null)).rpc()
   const whaleHub = await balance(conn, getAssociatedTokenAddressSync(hub.publicKey, whale.publicKey))
-  console.log(script('acrux-launchpad-admin.ts', ['tiers', hub.publicKey.toBase58(), '--tiers', '1000000:25,5000000:50,10000000:75', '--yes']).trim().split('\n').map(x => '    ' + x).join('\n'))
+  console.log(script('acrux-launchpad-admin.ts', ['tiers', hub.publicKey.toBase58(), '--tiers', '10000:33.34,100000:66.67,1000000:100', '--yes']).trim().split('\n').map(x => '    ' + x).join('\n'))
   const hs = await holderStatus(conn, lp, whale.publicKey)
   assert.ok(hs.discountBps > 0, 'whale qualifies for a tier')
   ok(`tiers set via the admin script; a holder of ${(Number(whaleHub) / 1e6).toLocaleString()} HUB gets ${hs.discountBps / 100}% off`)

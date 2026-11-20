@@ -120,6 +120,15 @@ export function holderDiscountBps(t: HolderTiersInfo | null, balance: bigint): n
   return Math.max(0, ...(t?.tiers ?? []).filter(x => balance >= x.minBalance).map(x => x.discountBps))
 }
 
+/** Tier names, smallest first (the same ladder as the program's tiers 1..4). */
+export const HOLDER_TIER_NAMES = ['Bronze', 'Silver', 'Gold', 'Diamond'] as const
+
+/** Name of the biggest tier a balance reaches, or null. */
+export function holderTierName(t: HolderTiersInfo | null, balance: bigint): string | null {
+  const i = (t?.tiers ?? []).filter(x => balance >= x.minBalance).length - 1
+  return i >= 0 ? HOLDER_TIER_NAMES[i] : null
+}
+
 /** The fee after a discount, rounded like the program does. */
 export const discountedFeeBps = (feeBps: number, discountBps: number) => Math.floor((feeBps * (10_000 - discountBps)) / 10_000)
 
@@ -129,11 +138,11 @@ export const discountedFeeBps = (feeBps: number, discountBps: number) => Math.fl
  */
 export async function holderStatus(conn: Connection, program: Program<any>, user: PublicKey) {
   const tiers = await loadHolderTiers(conn, program)
-  if (!tiers) return { tiers, account: null as PublicKey | null, balance: 0n, discountBps: 0 }
+  if (!tiers) return { tiers, account: null as PublicKey | null, balance: 0n, discountBps: 0, tierName: null as string | null }
   const ata = getAssociatedTokenAddressSync(tiers.mint, user)
   const bal = await conn.getTokenAccountBalance(ata).then(r => BigInt(r.value.amount)).catch(() => 0n)
   const discountBps = holderDiscountBps(tiers, bal)
-  return { tiers, account: discountBps > 0 ? ata : null, balance: bal, discountBps }
+  return { tiers, account: discountBps > 0 ? ata : null, balance: bal, discountBps, tierName: holderTierName(tiers, bal) }
 }
 
 export type CurveState = { virtualQuote: bigint; virtualTokens: bigint; realQuote: bigint; realTokens: bigint; graduationQuote: bigint; feeBps: number }
