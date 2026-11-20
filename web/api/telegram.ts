@@ -15,11 +15,16 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? ''
 const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? ''
-const BOT = process.env.TELEGRAM_BOT_USERNAME ?? 'AcruxHubBot'
+const BOT = process.env.TELEGRAM_BOT_USERNAME ?? 'AcruxHubAppBot'
 const GROUP = process.env.TELEGRAM_GROUP_ID ?? ''
 const SITE = 'https://acruxhub.com'
 const RPC = 'https://rpc.acrux.computer'
-const WRAPPED_ACRUX = 'So11111111111111111111111111111111111111112'
+// Our wrapped ACRUX (programs/wacrux): coins are priced in it, shown as ACRUX.
+const WRAPPED_ACRUX = '8wkvan326WoFWuQzpezYqjiyR93KZAWJdA9GNqxkMxxT'
+// Pre-switch demo tokens (worth nothing): coins priced in them are left out.
+const DEMO = new Set(['28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td', '713QqmE1xGXS8vACKxfxyr5YvtitXymtiR45E3egsdss'])
+// Launched by us, never traded, replaced by a later launch.
+const HIDDEN = new Set(['99ysnj1KnpG6mpEZa1kjN8JCkjDZifpjWL6r4gUPKYjN'])
 const AXB = '28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td'
 const LAUNCHPAD = '3qCdE6gNWinKpPX71JZk8DGe2AYsYaVg6v8WB7N3SKrd'
 // Launch account discriminator (sdk/src/idl/acruxhub_launchpad.json).
@@ -76,7 +81,7 @@ function decodeLaunch(d: Buffer) {
   let o = 261
   const str = () => { const n = d.readUInt32LE(o); const v = d.subarray(o + 4, o + 4 + n).toString('utf8'); o += 4 + n; return v }
   return {
-    mint: pk(40), curveQuote: pk(104),
+    mint: pk(40), curveQuote: pk(104), pool: pk(136),
     virtualQuote: u64(208), virtualTokens: u64(216), realQuote: u64(224), graduationQuote: u64(240),
     complete: d[250] === 1, graduated: d[251] === 1,
     name: str(), symbol: str(), uri: str(),
@@ -107,8 +112,32 @@ async function coins(): Promise<Coin[]> {
       graduated: l.graduated, complete: l.complete,
     }
   })
-  cache = { at: Date.now(), coins: out }
-  return out
+  const real = out.filter((c, i) => !DEMO.has(qMints[i]) && !HIDDEN.has(c.mint))
+  // Graduated coins trade in their Raydium pool: price them from its vaults.
+  const grads = real.filter(c => c.graduated)
+  const gi = grads.map(c => launches[out.indexOf(c)].pool)
+  const pools = gi.length ? await many(gi) : []
+  const vaults: string[] = []
+  const meta = pools.map(p => {
+    if (!p) return null
+    const d = Buffer.from(p.data[0], 'base64')
+    if (d.length !== 637) return null
+    const a = b58(d.subarray(72, 104)), b = b58(d.subarray(104, 136)), mA = b58(d.subarray(168, 200))
+    vaults.push(a, b)
+    return { a, b, tokenIsA: mA !== WRAPPED_ACRUX && !DEMO.has(mA), decA: d[331], decB: d[332] }
+  })
+  const vb = vaults.length ? await many(vaults) : []
+  // Graduation burns the unsold tokens, so use each mint's real supply (u64 at offset 36).
+  const supplies = grads.length ? (await many(grads.map(c => c.mint))).map(a => (a ? Number(Buffer.from(a.data[0], 'base64').readBigUInt64LE(36)) / 1e6 : 1e9)) : []
+  const amt = (acc: any) => (acc ? Number(Buffer.from(acc.data[0], 'base64').readBigUInt64LE(64)) : 0)
+  meta.forEach((m, i) => {
+    if (!m) return
+    const va = amt(vb[vaults.indexOf(m.a)]) / 10 ** m.decA, vbb = amt(vb[vaults.indexOf(m.b)]) / 10 ** m.decB
+    const [tok, quote] = m.tokenIsA ? [va, vbb] : [vbb, va]
+    if (tok > 0) { grads[i].price = quote / tok; grads[i].mcap = grads[i].price * supplies[i] }
+  })
+  cache = { at: Date.now(), coins: real }
+  return real
 }
 
 function fmtPrice(p: number) {
