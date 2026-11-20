@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { PublicKey, type Connection } from '@solana/web3.js'
 import { TOKEN_PROGRAM_ID } from '@solana/spl-token'
-import { AMM_ID, LAUNCHPAD_ID, BRIDGE_ID } from '@acruxhub/sdk'
+import { AMM_ID, LAUNCHPAD_ID, BRIDGE_ID, wacruxMint } from '@acruxhub/sdk'
 import { KNOWN_TOKENS } from './net.ts'
 
 export type Holding = { mint: string; amount: bigint; decimals: number; account: string }
@@ -36,7 +36,11 @@ export async function deployed(conn: Connection) {
 }
 
 const symbolCache = new Map<string, string>()
+/** Our wrapped ACRUX shows as plain ACRUX: it is 1:1 and the site wraps for you. */
+export const WACRUX = wacruxMint().toBase58()
+
 export function tokenLabel(mint: string, extra?: Record<string, string>) {
+  if (mint === WACRUX) return 'ACRUX'
   return KNOWN_TOKENS[mint]?.symbol ?? extra?.[mint] ?? symbolCache.get(mint) ?? `${mint.slice(0, 4)}…${mint.slice(-4)}`
 }
 export function rememberSymbol(mint: string, symbol: string) {

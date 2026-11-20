@@ -7,6 +7,7 @@ import { useAsync, tokenLabel } from '../hooks.ts'
 import { loadMarkets, launchSymbols, marketQuote, marketName, type Market } from '../data.ts'
 import { fmt, parseAmount } from '../net.ts'
 import { Action, Empty } from '../ui.tsx'
+import { wrapFor, spendable } from '../wrap.ts'
 
 const pairKey = (m: Market) => `${m.mintA.toBase58()}|${m.mintB.toBase58()}`
 const pct = (ppm: bigint) => `${(Number(ppm) / 10_000).toFixed(2)}%`
@@ -85,9 +86,12 @@ export function Swap() {
 
   const balIn = useAsync(async () => {
     if (!w.publicKey || !inMint || !inProgram) return null
+    let wrapped = 0n
     try {
-      return BigInt((await w.conn.getTokenAccountBalance(getAssociatedTokenAddressSync(inMint, w.publicKey, false, inProgram))).value.amount)
-    } catch { return 0n }
+      wrapped = BigInt((await w.conn.getTokenAccountBalance(getAssociatedTokenAddressSync(inMint, w.publicKey, false, inProgram))).value.amount)
+    } catch { /* no account yet */ }
+    // Paying in ACRUX: native ACRUX counts too, it's wrapped as part of the swap.
+    return spendable(w.conn, w.publicKey, inMint, wrapped)
   }, [w.publicKey, inMint?.toBase58(), w.refreshKey])
 
   if (markets.loading && !markets.data) return <div className="card narrow">Loading pools…</div>
@@ -183,7 +187,8 @@ export function Swap() {
                 feeRecipient: feeTo, feeBps, amm: ammProgram(w.provider!), deadlineSlot: (await w.conn.getSlot()) + 300,
               })
               const m = best!.m
-              const tx = new Transaction().add(...ixs)
+              const wrap = await wrapFor(w.conn, w.provider!, w.publicKey!, inMint!, raw!)
+              const tx = new Transaction().add(...wrap, ...ixs)
               const sealed = w.privateMode
               const sig = await w.send(tx)
               setLastSend(sealed ? 'private' : 'public')

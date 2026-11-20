@@ -8,6 +8,7 @@ skip-lint = false
 acruxhub_amm = "845G7nDPuxfzqbxEnVsrT72XxG5UJMBvunxhEYyAEMjB"
 acruxhub_launchpad = "3qCdE6gNWinKpPX71JZk8DGe2AYsYaVg6v8WB7N3SKrd"
 acruxhub_bridge = "D3ct55qQUcEp8RBiD6xU5e923yGN6B1SopFMNhQTc3CT"
+acruxhub_wacrux = "8gVj4nV5djhxNdEPFXHepFRhkyheMmHt5CWufQEdUU7u"
 
 [provider]
 cluster = "localnet"

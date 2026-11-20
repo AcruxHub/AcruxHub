@@ -154,8 +154,12 @@ async function initTelegram() {
   // supports it. Stored as base58 (88 chars) rather than a 64-number JSON list.
   const ss = tg.SecureStorage
   if (!ss || !tg.isVersionAtLeast?.('9.0')) return
-  const call = <T,>(fn: (cb: (err: string | null, v: T) => void) => void) =>
-    new Promise<T>((res, rej) => fn((err, v) => (err ? rej(new Error(err)) : res(v))))
+  // Every call times out: a client that never answers must not leave the app blank.
+  const call = <T,>(fn: (cb: (err: string | null, v: T) => void) => void, ms = 2500) =>
+    new Promise<T>((res, rej) => {
+      const t = setTimeout(() => rej(new Error('SecureStorage did not answer')), ms)
+      fn((err, v) => { clearTimeout(t); if (err) rej(new Error(err)); else res(v) })
+    })
   const toB58 = (v: string) => (v.startsWith('[') ? bs58.encode(Uint8Array.from(JSON.parse(v))) : v)
   const fromB58 = (v: string) => JSON.stringify(Array.from(bs58.decode(v)))
   const s: Secure = {

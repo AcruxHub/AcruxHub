@@ -1,5 +1,7 @@
 import { LAMPORTS_PER_SOL } from '@solana/web3.js'
-import { withdrawQuote } from '@acruxhub/sdk'
+import { withdrawQuote, wacruxProgram, unwrapInstruction } from '@acruxhub/sdk'
+import { Transaction } from '@solana/web3.js'
+import { WACRUX } from '../hooks.ts'
 import { useWallet } from '../wallet.tsx'
 import { useAsync, holdings, tokenLabel } from '../hooks.ts'
 import { loadPools, launchSymbols } from '../data.ts'
@@ -60,7 +62,16 @@ export function Portfolio() {
         <h3>Tokens</h3>
         {plain.length ? plain.map(t => (
           <div key={t.account} className="row" style={{ marginBottom: 4 }}>
-            <span>{tokenLabel(t.mint, symbols)}</span><span className="fixed">{fmt(t.amount, t.decimals)}</span>
+            <span>{t.mint === WACRUX ? 'Wrapped ACRUX' : tokenLabel(t.mint, symbols)}</span><span className="fixed">{fmt(t.amount, t.decimals)}</span>
+            {t.mint === WACRUX && (
+              <span style={{ marginLeft: 'auto', minWidth: 120 }}>
+                <Action primary={false} label="Unwrap to ACRUX" run={async () => {
+                  const sig = await w.send(new Transaction().add(await unwrapInstruction(wacruxProgram(w.provider!), w.publicKey!, t.amount)))
+                  w.bump()
+                  return `Unwrapped. ${sig}`
+                }} />
+              </span>
+            )}
           </div>
         )) : <Empty>No tokens yet.</Empty>}
       </div>

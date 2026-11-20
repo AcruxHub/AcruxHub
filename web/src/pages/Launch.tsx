@@ -15,6 +15,7 @@ import { useMeta, safeUrl, uploadCoin, readImage, type CoinMeta } from '../meta.
 import { launchpadUpgraded, launchpadFor } from '../launchpad.ts'
 import { loadTrades, holdersFromTrades, ago, compact, fmtPrice, openingPrice, type Trade } from '../history.ts'
 import { PriceChart } from '../chart.tsx'
+import { wrapFor, spendable } from '../wrap.ts'
 
 type LaunchRow = { publicKey: PublicKey; account: any }
 type Quote = { quoteMint: PublicKey; quoteSym: string; qd: number }
@@ -405,7 +406,7 @@ function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: La
     if (!w.publicKey) return null
     const get = async (m: PublicKey) => { try { return BigInt((await w.conn.getTokenAccountBalance(getAssociatedTokenAddressSync(m, w.publicKey!))).value.amount) } catch { return 0n } }
     const [qb, tb] = await Promise.all([get(quoteMint), get(a.mint)])
-    return { quote: qb, tokens: tb }
+    return { quote: await spendable(w.conn, w.publicKey, quoteMint, qb), tokens: tb }
   }, [w.publicKey, w.conn, w.refreshKey, quoteMint.toBase58()])
   const plain = (v: bigint, d: number) => fmt(v, d, d).replace(/,/g, '')
   const chips: [string, () => void][] = side === 'buy'
@@ -462,8 +463,9 @@ function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: La
         className={side === 'buy' ? 'buy' : 'sell'}
         run={async () => {
           const lp = launchpadFor(w.provider!, upgraded)
+          const wrap = side === 'buy' ? await wrapFor(w.conn, w.provider!, w.publicKey!, quoteMint, raw!) : []
           const tx = side === 'buy'
-            ? await lp.methods.buy(new BN(raw!.toString()), new BN(minOut((q as any).tokensOut).toString())).accountsPartial(accounts()).preInstructions(pre()).transaction()
+            ? await lp.methods.buy(new BN(raw!.toString()), new BN(minOut((q as any).tokensOut).toString())).accountsPartial(accounts()).preInstructions([...pre(), ...wrap]).transaction()
             : await lp.methods.sell(new BN(raw!.toString()), new BN(minOut((q as any).quoteOut).toString())).accountsPartial(accounts()).preInstructions(pre()).transaction()
           const sig = await w.send(tx)
           setAmt('')
@@ -694,6 +696,7 @@ function Create({ pairs, upgraded, onDone }: { pairs: Pair[]; upgraded: boolean;
             const post = buyQuote
               ? [
                   createAssociatedTokenAccountIdempotentInstruction(w.publicKey!, getAssociatedTokenAddressSync(quoteMint, feeRecipient, true), feeRecipient, quoteMint),
+                  ...(await wrapFor(w.conn, w.provider!, w.publicKey!, quoteMint, buyRaw!)),
                   await lp.methods.buy(new BN(buyRaw!.toString()), new BN(buyQuote.tokensOut.toString()))
                     .accountsPartial({
                       user: w.publicKey!, launch, mint: mint.publicKey, quoteMint,

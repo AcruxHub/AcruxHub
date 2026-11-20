@@ -11,12 +11,12 @@ import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import * as anchor from '@coral-xyz/anchor'
-import { ComputeBudgetProgram, Connection, Keypair, PublicKey } from '@solana/web3.js'
-import { NATIVE_MINT, createWrappedNativeAccount, getAssociatedTokenAddressSync, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token'
+import { ComputeBudgetProgram, Connection, Keypair, PublicKey, Transaction, sendAndConfirmTransaction } from '@solana/web3.js'
+import { getAssociatedTokenAddressSync, getMint, getOrCreateAssociatedTokenAccount } from '@solana/spl-token'
 import liveV1 from '../web/src/idl-launchpad-live-v1.json' with { type: 'json' }
 import {
   launchpadProgram, launchConfig, launchAddress, curveBuy, stateOf, graduateRaydiumAccounts, LAUNCHPAD_ID, BN,
-  holderStatus, discountedFeeBps, decodeCpmmPool,
+  holderStatus, discountedFeeBps, decodeCpmmPool, wacruxProgram, wacruxMint, wrapInstruction,
 } from '../sdk/src/index.ts'
 import { providerFor, devWallet, fund, newUser, newMint, giveTokens, balance, waitForChain } from '../tests/helpers.ts'
 
@@ -87,9 +87,14 @@ if (phase === '1') {
   }).rpc()
   ok('the v1 coin still decodes and trades after the upgrade')
 
+  // Our wrapped ACRUX goes live first: it is the launchpad's new quote token.
+  await wacruxProgram(providerFor(conn, devWallet)).methods.initialize().accountsPartial({ payer: devWallet.publicKey }).rpc()
+  const WAC = wacruxMint()
+  ok(`wACRUX initialized (mint ${WAC.toBase58()})`)
+
   // The real scripts: switch the quote to wrapped ACRUX (the native mint here), pause, unpause.
-  console.log(script('acrux-launchpad-set-quote.ts', [NATIVE_MINT.toBase58(), '--yes']).trim().split('\n').map(x => '    ' + x).join('\n'))
-  assert.ok(((await lp.account.config.fetch(launchConfig())) as any).quoteMint.equals(NATIVE_MINT))
+  console.log(script('acrux-launchpad-set-quote.ts', [WAC.toBase58(), '--yes']).trim().split('\n').map(x => '    ' + x).join('\n'))
+  assert.ok(((await lp.account.config.fetch(launchConfig())) as any).quoteMint.equals(WAC))
   ok('set_quote via scripts/acrux-launchpad-set-quote.ts')
   script('acrux-launchpad-admin.ts', ['pause', '--yes'])
   script('acrux-launchpad-admin.ts', ['unpause', '--yes'])
@@ -99,19 +104,20 @@ if (phase === '1') {
   const hub = Keypair.generate()
   const creator = await newUser(conn, 50)
   await launchpadProgram(providerFor(conn, creator)).methods.createLaunch('AcruxHub', 'HUB', HUB_URI)
-    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: hub.publicKey, quoteMint: NATIVE_MINT, quotePair: null })
+    .accountsPartial({ creator: creator.publicKey, config: launchConfig(), mint: hub.publicKey, quoteMint: WAC, quotePair: null })
     .signers([hub]).rpc()
   const hubKey = launchAddress(hub.publicKey)
   let hl: any = await lp.account.launch.fetch(hubKey)
   assert.equal(hl.uri, HUB_URI)
-  ok('$HUB launched in wrapped ACRUX with its metadata')
+  ok('$HUB launched in wACRUX with its metadata')
 
   // A buyer gets HUB; tiers go on through the real admin script.
-  const feeNative = (await getOrCreateAssociatedTokenAccount(conn, devWallet, NATIVE_MINT, treasury.publicKey, true)).address
+  const feeNative = (await getOrCreateAssociatedTokenAccount(conn, devWallet, WAC, treasury.publicKey, true)).address
   const whale = await newUser(conn, 200)
-  const whaleQuote = await createWrappedNativeAccount(conn, whale, whale.publicKey, 150_000_000_000)
+  await sendAndConfirmTransaction(conn, new Transaction().add(await wrapInstruction(wacruxProgram(providerFor(conn, whale)), whale.publicKey, 150_000_000_000n)), [whale])
+  const whaleQuote = getAssociatedTokenAddressSync(WAC, whale.publicKey)
   const hubTrade = (u: Keypair, uq: PublicKey, holderTokens: PublicKey | null) => ({
-    user: u.publicKey, launch: hubKey, mint: hub.publicKey, quoteMint: NATIVE_MINT, curveTokens: hl.curveTokens, curveQuote: hl.curveQuote,
+    user: u.publicKey, launch: hubKey, mint: hub.publicKey, quoteMint: WAC, curveTokens: hl.curveTokens, curveQuote: hl.curveQuote,
     userTokens: getAssociatedTokenAddressSync(hub.publicKey, u.publicKey), userQuote: uq, feeQuote: feeNative, holderTokens,
   })
   const firstBuy = BigInt(hl.graduationQuote.toString()) / 4n
@@ -135,7 +141,7 @@ if (phase === '1') {
 
   // $HUB graduates into a real Raydium pool.
   hl = await lp.account.launch.fetch(hubKey)
-  const g = graduateRaydiumAccounts(hl, NATIVE_MINT, AMM_CONFIG)
+  const g = graduateRaydiumAccounts(hl, WAC, AMM_CONFIG)
   const cranker = await newUser(conn, 20)
   await launchpadProgram(providerFor(conn, cranker)).methods.graduateRaydium().accountsPartial({ payer: cranker.publicKey, ...g }).preInstructions([cu]).rpc()
   assert.equal(((await lp.account.launch.fetch(hubKey)) as any).graduated, true)
@@ -146,9 +152,9 @@ if (phase === '1') {
   const supplyBefore = (await getMint(conn, hub.publicKey)).supply
   const pool = decodeCpmmPool(g.poolState, (await conn.getAccountInfo(g.poolState))!.data as Buffer)
   const lpBefore = pool.lpSupply
-  const dry = script('hub-buyback.ts', [hub.publicKey.toBase58(), NATIVE_MINT.toBase58()], 'keys/local-treasury.json')
+  const dry = script('hub-buyback.ts', [hub.publicKey.toBase58(), WAC.toBase58()], 'keys/local-treasury.json')
   console.log(dry.trim().split('\n').map(x => '    ' + x).join('\n'))
-  const run = script('hub-buyback.ts', [hub.publicKey.toBase58(), NATIVE_MINT.toBase58(), '--yes'], 'keys/local-treasury.json')
+  const run = script('hub-buyback.ts', [hub.publicKey.toBase58(), WAC.toBase58(), '--yes'], 'keys/local-treasury.json')
   console.log(run.trim().split('\n').map(x => '    ' + x).join('\n'))
   const supplyAfter = (await getMint(conn, hub.publicKey)).supply
   const poolAfter = decodeCpmmPool(g.poolState, (await conn.getAccountInfo(g.poolState))!.data as Buffer)

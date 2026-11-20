@@ -12,7 +12,7 @@ DEPLOY="${CARGO_TARGET_DIR:-$PWD/target}/deploy"
 ours() {
   [ -f keys/dev-wallet.json ] || return 0
   local auth; auth=$(solana-keygen pubkey keys/dev-wallet.json)
-  for p in amm launchpad; do
+  for p in amm launchpad wacrux; do
     # LAUNCHPAD_SO loads a different launchpad binary, e.g. the one live on Acrux
     # (scripts/rehearse-go-live.sh starts from it and upgrades in place).
     local so="$DEPLOY/acruxhub_$p.so"

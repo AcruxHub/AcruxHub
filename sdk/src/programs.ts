@@ -8,9 +8,11 @@ import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import ammIdl from './idl/acruxhub_amm.json' with { type: 'json' }
 import launchpadIdl from './idl/acruxhub_launchpad.json' with { type: 'json' }
 import bridgeIdl from './idl/acruxhub_bridge.json' with { type: 'json' }
+import wacruxIdl from './idl/acruxhub_wacrux.json' with { type: 'json' }
 import type { AcruxhubAmm } from './idl/acruxhub_amm.ts'
 import type { AcruxhubLaunchpad } from './idl/acruxhub_launchpad.ts'
 import type { AcruxhubBridge } from './idl/acruxhub_bridge.ts'
+import type { AcruxhubWacrux } from './idl/acruxhub_wacrux.ts'
 import { sha256 } from '@noble/hashes/sha256'
 import { cpmmPoolAddresses, RAYDIUM_CPMM_AUTHORITY, RAYDIUM_CPMM_CREATE_FEE_RECEIVER, RAYDIUM_CPMM_ID } from './raydium.ts'
 
@@ -297,3 +299,25 @@ export async function allAccounts<A = any>(
 
 /** Byte offset of Outbound.sender: discriminator 8 + nonce 8 + source_chain 2 + dest_chain 2 + dest_mint 32. */
 export const OUTBOUND_SENDER_OFFSET = 52
+
+// ---- Wrapped ACRUX: Acrux's native coin as an SPL token, 1:1 (programs/wacrux) ----
+export type { AcruxhubWacrux }
+export const WACRUX_ID = new PublicKey(wacruxIdl.address)
+export const wacruxProgram = (p: Provider) => new Program<AcruxhubWacrux>(wacruxIdl as AcruxhubWacrux, p)
+export const wacruxVault = () => pda([enc('vault')], WACRUX_ID)
+/** The wACRUX mint (9 decimals: 1 raw unit = 1 lamport of ACRUX). */
+export const wacruxMint = () => pda([enc('mint')], WACRUX_ID)
+
+/** Wraps `lamports` ACRUX into the user's wACRUX account (created if needed). */
+export function wrapInstruction(program: Program<AcruxhubWacrux>, user: PublicKey, lamports: bigint) {
+  return program.methods.wrap(new anchor.BN(lamports.toString())).accountsPartial({
+    user, vault: wacruxVault(), mint: wacruxMint(), userTokens: getAssociatedTokenAddressSync(wacruxMint(), user),
+  }).instruction()
+}
+
+/** Unwraps `amount` wACRUX back into native ACRUX. */
+export function unwrapInstruction(program: Program<AcruxhubWacrux>, user: PublicKey, amount: bigint) {
+  return program.methods.unwrap(new anchor.BN(amount.toString())).accountsPartial({
+    user, vault: wacruxVault(), mint: wacruxMint(), userTokens: getAssociatedTokenAddressSync(wacruxMint(), user),
+  }).instruction()
+}
