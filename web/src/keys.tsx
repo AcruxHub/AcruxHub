@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useWallet, storedKeyAddress } from './wallet.tsx'
-import { isNative } from './native.ts'
+import { secureWallet } from './native.ts'
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   // Portal to <body>: the sticky header's backdrop-filter would otherwise trap a fixed overlay.
@@ -31,7 +31,7 @@ export function KeyBackup({ onClose }: { onClose: () => void }) {
         AcruxHub will never ask you for it.
       </p>
       <p className="muted">
-        {isNative ? 'It lives only on this phone. ' : 'It lives only in this browser. '}
+        {secureWallet ? 'It lives only on this phone. ' : 'It lives only in this browser. '}
         Write it down or store it in a password manager. You can import it into Phantom or Backpack, or back into AcruxHub.
       </p>
       <div className={`secret mono ${shown ? '' : 'blur'}`} aria-hidden={!shown}>{secret}</div>
@@ -53,7 +53,7 @@ export function KeyImport({ onClose }: { onClose: () => void }) {
   return (
     <Modal title="Import a key" onClose={onClose}>
       <p className="muted" style={{ marginTop: 0 }}>
-        Paste a secret key (base58, or the JSON number list from a keypair file). It's stored {isNative ? 'in this phone’s secure storage' : 'in this browser'} and never sent anywhere.
+        Paste a secret key (base58, or the JSON number list from a keypair file). It's stored {secureWallet ? 'in this phone’s secure storage' : 'in this browser'} and never sent anywhere.
       </p>
       <textarea className="mono" rows={4} value={v} onChange={e => { setV(e.target.value); setErr(null) }} placeholder="Secret key" spellCheck={false} autoComplete="off" autoCapitalize="off" />
       {existing && (
