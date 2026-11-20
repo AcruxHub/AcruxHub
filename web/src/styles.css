@@ -330,3 +330,11 @@ sub.zeros { font-size: .72em; vertical-align: -.25em; margin: 0 1px; color: var(
 .native-ios .modal-backdrop { padding-top: calc(16px + env(safe-area-inset-top)); }
 /* No text-selection callouts or tap flashes on buttons in the app. */
 .native button, .native nav a { -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+
+/* ACRUX balance on the wallet button */
+.wallet-bal { color: var(--text); font-weight: 600; margin-right: 8px; padding-right: 8px; border-right: 1px solid var(--line-2); }
+.wallet-addr { color: var(--muted); }
+.menu-balance { display: grid; gap: 2px; padding: 10px 12px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+.menu-balance strong { font-size: 16px; }
+.menu-balance small { color: var(--muted); }
+@media (max-width: 640px) { .wallet-addr { display: none; } .wallet-bal { border-right: 0; margin-right: 0; padding-right: 0; } }

@@ -3,7 +3,9 @@ import { useWallet } from './wallet.tsx'
 import { KeyBackup, KeyImport } from './keys.tsx'
 import { PageBoundary } from './boundary.tsx'
 import { inApp, secureWallet } from './native.ts'
-import { short, NETWORKS, refreshDemoTokens, LAUNCHES_PAUSED } from './net.ts'
+import { short, fmt, NETWORKS, refreshDemoTokens, LAUNCHES_PAUSED } from './net.ts'
+import { getAssociatedTokenAddressSync } from '@solana/spl-token'
+import { wacruxMint } from '@acruxhub/sdk'
 import { useAsync, deployed } from './hooks.ts'
 import { Swap } from './pages/Swap.tsx'
 import { Pools } from './pages/Pools.tsx'
@@ -140,6 +142,17 @@ function WalletButton() {
   const [open, setOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [modal, setModal] = useState<'backup' | 'import' | null>(null)
+  // ACRUX the wallet holds: native plus wrapped (the site wraps for you, so both spend).
+  const [tick, setTick] = useState(0)
+  useEffect(() => { const t = setInterval(() => setTick(x => x + 1), 15_000); return () => clearInterval(t) }, [])
+  const acrux = useAsync(async () => {
+    if (!w.publicKey) return null
+    const [native, wrapped] = await Promise.all([
+      w.conn.getBalance(w.publicKey).then(BigInt),
+      w.conn.getTokenAccountBalance(getAssociatedTokenAddressSync(wacruxMint(), w.publicKey)).then(r => BigInt(r.value.amount)).catch(() => 0n),
+    ])
+    return { native, wrapped, total: native + wrapped }
+  }, [w.publicKey?.toBase58(), w.conn, w.refreshKey, tick])
   const modals = <>{modal === 'backup' && <KeyBackup onClose={() => setModal(null)} />}{modal === 'import' && <KeyImport onClose={() => setModal(null)} />}</>
   useEffect(() => {
     if (!open) return
@@ -165,9 +178,18 @@ function WalletButton() {
   }
   return (
     <div className="wallet">
-      <button onClick={() => setOpen(o => !o)}><span className="num">{short(w.publicKey)}</span>{w.kind === 'test' && <small style={{ marginLeft: 6 }}>key</small>}</button>
+      <button onClick={() => setOpen(o => !o)}>
+        {acrux.data && <span className="wallet-bal num">{fmt(acrux.data.total, 9, 2)} ACRUX</span>}
+        <span className="num wallet-addr">{short(w.publicKey)}</span>{w.kind === 'test' && <small style={{ marginLeft: 6 }}>key</small>}
+      </button>
       {open && (
         <div className="menu">
+          {acrux.data && (
+            <div className="menu-balance">
+              <strong className="num">{fmt(acrux.data.total, 9, 4)} ACRUX</strong>
+              <small>{acrux.data.wrapped > 0n ? `${fmt(acrux.data.native, 9, 4)} ACRUX + ${fmt(acrux.data.wrapped, 9, 4)} wrapped` : 'available to trade (a little is kept for fees)'}</small>
+            </div>
+          )}
           <button onClick={() => { navigator.clipboard.writeText(w.publicKey!.toBase58()); setOpen(false) }}>Copy address</button>
           <button onClick={() => { location.hash = '#Portfolio'; setOpen(false) }}>Portfolio</button>
           {w.network.gateway && (

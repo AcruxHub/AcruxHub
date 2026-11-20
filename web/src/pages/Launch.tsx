@@ -434,7 +434,7 @@ function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: La
       </div>
       <div className="row" style={{ justifyContent: 'space-between', marginBottom: 6 }}>
         <small>{side === 'buy' ? 'You pay (fee included)' : 'You sell'}</small>
-        {bal.data && <small className="fixed">Balance <span className="num">{side === 'buy' ? fmt(bal.data.quote, qd, 4) : fmt(bal.data.tokens, TOKEN_DECIMALS, 2)}</span></small>}
+        {bal.data && <small className="fixed">You can spend <span className="num" style={{ color: 'var(--text)' }}>{side === 'buy' ? fmt(bal.data.quote, qd, 4) : fmt(bal.data.tokens, TOKEN_DECIMALS, 2)}</span> {side === 'buy' ? quoteSym : a.symbol}</small>}
       </div>
       <div className="amount-box">
         <input inputMode="decimal" value={amt} onChange={e => setAmt(e.target.value)} placeholder="0.0" aria-label="Amount" />
