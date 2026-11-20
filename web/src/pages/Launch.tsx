@@ -473,7 +473,7 @@ function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: La
         className={side === 'buy' ? 'buy' : 'sell'}
         run={async () => {
           const lp = launchpadFor(w.provider!, upgraded)
-          const wrap = side === 'buy' ? await wrapFor(w.conn, w.provider!, w.publicKey!, quoteMint, raw!) : []
+          const wrap = side === 'buy' ? await wrapFor(w.conn, w.provider!, w.publicKey!, quoteMint, (q as any).quoteToCurve + (q as any).fee) : []
           const tx = side === 'buy'
             ? await lp.methods.buy(new BN(raw!.toString()), new BN(minOut((q as any).tokensOut).toString())).accountsPartial(accounts()).preInstructions([...pre(), ...wrap]).transaction()
             : await lp.methods.sell(new BN(raw!.toString()), new BN(minOut((q as any).quoteOut).toString())).accountsPartial(accounts()).preInstructions(pre()).transaction()
@@ -706,7 +706,7 @@ function Create({ pairs, upgraded, onDone }: { pairs: Pair[]; upgraded: boolean;
             const post = buyQuote
               ? [
                   createAssociatedTokenAccountIdempotentInstruction(w.publicKey!, getAssociatedTokenAddressSync(quoteMint, feeRecipient, true), feeRecipient, quoteMint),
-                  ...(await wrapFor(w.conn, w.provider!, w.publicKey!, quoteMint, buyRaw!)),
+                  ...(await wrapFor(w.conn, w.provider!, w.publicKey!, quoteMint, buyQuote.quoteToCurve + buyQuote.fee)),
                   await lp.methods.buy(new BN(buyRaw!.toString()), new BN(buyQuote.tokensOut.toString()))
                     .accountsPartial({
                       user: w.publicKey!, launch, mint: mint.publicKey, quoteMint,
