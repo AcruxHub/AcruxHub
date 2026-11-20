@@ -9,7 +9,7 @@ import {
 import { useWallet, readProvider } from '../wallet.tsx'
 import { useAsync, tokenLabel } from '../hooks.ts'
 import { loadLaunchConfig, decimalsOf } from '../data.ts'
-import { fmt, parseAmount, short, LAUNCHES_PAUSED } from '../net.ts'
+import { fmt, parseAmount, short, LAUNCHES_PAUSED, KNOWN_TOKENS } from '../net.ts'
 import { Action, CopyButton, Price } from '../ui.tsx'
 import { useMeta, safeUrl, uploadCoin, readImage, type CoinMeta } from '../meta.ts'
 import { launchpadUpgraded, launchpadFor } from '../launchpad.ts'
@@ -20,7 +20,7 @@ import { wrapFor, spendable } from '../wrap.ts'
 type LaunchRow = { publicKey: PublicKey; account: any }
 type Quote = { quoteMint: PublicKey; quoteSym: string; qd: number }
 type View = { kind: 'board'; q: string } | { kind: 'create' } | { kind: 'coin'; key: string }
-type Tab = 'top' | 'new' | 'almost' | 'graduated'
+type Tab = 'top' | 'new' | 'almost' | 'graduated' | 'test'
 
 const TOKEN_DECIMALS = 6
 
@@ -41,7 +41,7 @@ export function Launch() {
   const config = useAsync(() => loadLaunchConfig(w.conn), [w.conn])
   const launches = useAsync(async () => {
     const lp = launchpadFor(readProvider(w.conn), false) // Launch accounts read the same in both builds
-    const all = (await allAccounts(lp, 'Launch')) as LaunchRow[]
+    const all = ((await allAccounts(lp, 'Launch')) as LaunchRow[]).filter(l => !HIDDEN_COINS.has(l.account.mint.toBase58()))
     return all.sort((a, b) => b.account.index.cmp(a.account.index))
   }, [w.conn, w.refreshKey])
   const defaultDecimals = useAsync(async () => (config.data ? decimalsOf(w.conn, config.data.quoteMint) : 9), [config.data])
@@ -129,6 +129,11 @@ function BoardSkeleton() {
 
 // ------------------------------------------------------------------ board
 
+/** Launched by us and never traded, replaced by a later launch: kept off the board. */
+const HIDDEN_COINS = new Set(['99ysnj1KnpG6mpEZa1kjN8JCkjDZifpjWL6r4gUPKYjN'])
+/** Coins priced in the faucet's demo tokens, from before Acrux's gas switch: worth nothing. */
+const isTestCoin = (q: Quote) => !!KNOWN_TOKENS[q.quoteMint.toBase58()]
+
 function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNote, paused }: {
   launches: LaunchRow[] | null; loading: boolean; error: string | null; quoteOf: (l: LaunchRow) => Quote; totalSupply: bigint; query: string; pausedNote: string | null; paused: boolean
 }) {
@@ -136,12 +141,15 @@ function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNo
   const [q, setQ] = useState(query)
   useEffect(() => setQ(query), [query])
   const needle = q.trim().toLowerCase()
-  const all = launches ?? []
+  const everything = launches ?? []
+  // Real coins first; the pre-switch test coins only show on their own tab.
+  const tests = everything.filter(l => isTestCoin(quoteOf(l)))
+  const all = everything.filter(l => !isTestCoin(quoteOf(l)))
   // A pasted CA that matches a coin opens it straight away.
   useEffect(() => {
-    const hit = all.find(l => l.account.mint.toBase58() === q.trim())
+    const hit = everything.find(l => l.account.mint.toBase58() === q.trim())
     if (hit) location.hash = `#Launch/${hit.publicKey.toBase58()}`
-  }, [q, all.length])
+  }, [q, everything.length])
   const filtered = all.filter(l => !needle || l.account.name.toLowerCase().includes(needle) || l.account.symbol.toLowerCase().includes(needle) || l.account.mint.toBase58().toLowerCase() === needle)
   const progress = (l: LaunchRow) => curveProgress(stateOf(l.account))
   const list = useMemo(() => {
@@ -149,6 +157,7 @@ function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNo
     if (tab === 'top') return xs.filter(l => !l.account.graduated).sort((a, b) => progress(b) - progress(a))
     if (tab === 'new') return xs
     if (tab === 'almost') return xs.filter(l => !l.account.graduated && progress(l) >= 0.5).sort((a, b) => progress(b) - progress(a))
+    if (tab === 'test') return tests.filter(l => !needle || l.account.symbol.toLowerCase().includes(needle) || l.account.name.toLowerCase().includes(needle))
     return xs.filter(l => l.account.graduated)
   }, [filtered.length, tab, needle, launches])
   // The coin closest to graduating, not yet complete, gets the spotlight.
@@ -158,17 +167,17 @@ function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNo
     <>
       {pausedNote && <PausedBanner paused={paused} note={pausedNote} />}
       {feature && !needle && <Feature l={feature} {...quoteOf(feature)} totalSupply={totalSupply} />}
-      {launches && launches.length > 0 && (
+      {launches && all.length > 0 && (
         <div className="board-summary">
-          <span><strong className="num">{launches.length}</strong> coins</span>
-          <span><strong className="num">{launches.filter(l => l.account.graduated).length}</strong> graduated</span>
-          <span><strong className="num">{launches.filter(l => !l.account.graduated && !l.account.complete).length}</strong> on the curve</span>
+          <span><strong className="num">{all.length}</strong> {all.length === 1 ? 'coin' : 'coins'}</span>
+          <span><strong className="num">{all.filter(l => l.account.graduated).length}</strong> graduated</span>
+          <span><strong className="num">{all.filter(l => !l.account.graduated && !l.account.complete).length}</strong> on the curve</span>
           <span className="faint">Every coin: fixed supply, no presale, liquidity locked forever at graduation</span>
         </div>
       )}
       <div className="board-tools">
         <div className="seg" role="tablist" aria-label="Sort coins">
-          {([['top', 'Top'], ['new', 'New'], ['almost', 'About to graduate'], ['graduated', 'Graduated']] as [Tab, string][]).map(([k, label]) => (
+          {([['top', 'Top'], ['new', 'New'], ['almost', 'About to graduate'], ['graduated', 'Graduated'], ...(tests.length ? [['test', 'Test coins']] : [])] as [Tab, string][]).map(([k, label]) => (
             <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>
           ))}
         </div>
@@ -274,6 +283,7 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
   return (
     <>
       <p style={{ margin: '0 0 14px' }}><a href="#Launch" className="muted">← Coins</a></p>
+      {isTestCoin({ quoteMint, quoteSym, qd }) && <p className="notice warn" style={{ marginTop: 0 }}>Test coin from before Acrux switched to real ACRUX. It is priced in {quoteSym}, the faucet's demo token, which is worth nothing.</p>}
       <div className="coin-page">
         <div className="coin-main">
           <div className="coin-head">
