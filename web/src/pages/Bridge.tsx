@@ -1,133 +1,167 @@
-import { useState } from 'react'
-import { Connection, PublicKey } from '@solana/web3.js'
+// Bridge ACRUX from Solana to Acrux, through Acrux's own bridge program: the
+// deposit is signed on Solana by the user's Solana wallet (Phantom, Backpack) and
+// arrives on Acrux as native ACRUX, 1:1. Going back to Solana isn't open yet.
+import { useEffect, useMemo, useState } from 'react'
+import { Connection, PublicKey, Transaction } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
-import { bridgeProgram, bridgeConfig, bridgeCustody, outboundAddress, consumedAddress, CHAIN, BN, allAccounts, OUTBOUND_SENDER_OFFSET } from '@acruxhub/sdk'
-import { useWallet, readProvider } from '../wallet.tsx'
-import { useAsync, tokenLabel } from '../hooks.ts'
-import { decimalsOf } from '../data.ts'
+import { acruxBridgeDeposit, acruxBridgeNextSequence, ACRUX_SOLANA_MINT, ACRUX_SOLANA_DECIMALS } from '@acruxhub/sdk'
+import { useWallet } from '../wallet.tsx'
+import { useAsync } from '../hooks.ts'
 import { fmt, parseAmount, short } from '../net.ts'
-import { Action, Empty } from '../ui.tsx'
+import { inApp, API_BASE } from '../native.ts'
 
-const CHAIN_NAME: Record<number, string> = { [CHAIN.solana]: 'Solana', [CHAIN.acrux]: 'Acrux Net' }
+// Solana's public RPC refuses browsers, so reads go through our own /api/solana.
+const SOLANA_RPC = `${API_BASE || location.origin}/api/solana`
+const MIN_SOL = 5_000_000n // 0.005 SOL for the fee and the deposit record's rent
 
-/** The other side of the bridge for each network (where to check delivery). */
-const PEER: Record<string, string | null> = {
-  acrux: null, // Solana side stays undeployed until the bridge is audited
-  local: 'http://127.0.0.1:8899',
+type SolWallet = {
+  connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: { toString(): string } }>
+  signAndSendTransaction(tx: Transaction): Promise<{ signature: string }>
+}
+const solanaWallet = (): SolWallet | null => {
+  const w = window as any
+  return w.phantom?.solana ?? w.backpack ?? w.solana ?? null
 }
 
 export function Bridge() {
   const w = useWallet()
-  const peerRpc = PEER[w.network.id]
-  const data = useAsync(async () => {
-    const b = bridgeProgram(readProvider(w.conn))
-    const config = await b.account.config.fetchNullable(bridgeConfig())
-    if (!config) return null
-    const routes = await allAccounts<any>(b, 'Route')
-    const decimals = Object.fromEntries(await Promise.all(routes.map(async r => [r.account.localMint.toBase58(), await decimalsOf(w.conn, r.account.localMint)] as const)))
-    const mine = w.publicKey
-      ? (await allAccounts<any>(b, 'Outbound', { match: d => d.subarray(OUTBOUND_SENDER_OFFSET, OUTBOUND_SENDER_OFFSET + 32).equals(w.publicKey!.toBuffer()) })).sort((x, y) => y.account.nonce.cmp(x.account.nonce))
-      : []
-    return { config, routes, decimals, mine }
-  }, [w.conn, w.publicKey, w.refreshKey])
-
-  const delivered = useAsync(async () => {
-    if (!peerRpc || !data.data?.mine.length) return {}
-    const peer = new Connection(peerRpc, 'confirmed')
-    const keys = data.data.mine.map(o => consumedAddress(o.account.sourceChain, BigInt(o.account.nonce.toString())))
-    const infos = await peer.getMultipleAccountsInfo(keys)
-    return Object.fromEntries(data.data.mine.map((o, i) => [o.account.nonce.toString(), !!infos[i]]))
-  }, [data.data, peerRpc])
-
-  const [routeIdx, setRouteIdx] = useState(0)
-  const [amount, setAmount] = useState('')
+  const sol = useMemo(() => new Connection(SOLANA_RPC, 'confirmed'), [])
+  const [from, setFrom] = useState<PublicKey | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [amt, setAmt] = useState('')
   const [to, setTo] = useState('')
+  const [editTo, setEditTo] = useState(false)
+  const [tick, setTick] = useState(0)
+  const [sent, setSent] = useState<{ sig: string; amount: bigint; to: PublicKey; before: bigint; arrived: boolean } | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  if (data.loading && !data.data) return <div className="card narrow">Loading…</div>
-  if (!data.data) {
-    return (
-      <div className="card narrow">
-        <h2>Bridge</h2>
-        <Empty>The bridge isn't live on {w.network.name}. It goes live once its Solana side is deployed, and that waits for an independent security review, because a bridge is where real money sits.</Empty>
-      </div>
-    )
+  // Reconnect silently if the wallet already trusts the site.
+  useEffect(() => {
+    solanaWallet()?.connect({ onlyIfTrusted: true }).then(r => setFrom(new PublicKey(r.publicKey.toString()))).catch(() => {})
+  }, [])
+
+  const balances = useAsync(async () => {
+    if (!from) return null
+    const [acrux, lamports] = await Promise.all([
+      sol.getTokenAccountBalance(getAssociatedTokenAddressSync(ACRUX_SOLANA_MINT, from)).then(r => BigInt(r.value.amount)).catch(() => 0n),
+      sol.getBalance(from).then(BigInt),
+    ])
+    return { acrux, lamports }
+  }, [from?.toBase58(), tick])
+
+  // Where it arrives: by default the same address on Acrux (the same key works there).
+  const recipient = useMemo(() => {
+    const s = to.trim()
+    if (!editTo || !s) return from
+    try { return new PublicKey(s) } catch { return null }
+  }, [to, from, editTo])
+  const raw = parseAmount(amt, ACRUX_SOLANA_DECIMALS)
+
+  // After sending, watch the recipient's ACRUX on Acrux until the deposit lands.
+  useEffect(() => {
+    if (!sent || sent.arrived) return
+    const t = setInterval(async () => {
+      const now = BigInt(await w.conn.getBalance(sent.to).catch(() => 0))
+      // Credited as lamports: 1 base unit (6 decimals) = 1,000 lamports (9 decimals).
+      if (now >= sent.before + sent.amount * 1000n - 10_000n) { setSent({ ...sent, arrived: true }); w.bump() }
+    }, 3000)
+    return () => clearInterval(t)
+  }, [sent, w.conn])
+
+  const wallet = solanaWallet()
+  const problems = [
+    !raw || raw <= 0n ? 'Enter an amount.' : null,
+    balances.data && raw && raw > balances.data.acrux ? 'That is more ACRUX than this wallet holds on Solana.' : null,
+    balances.data && balances.data.lamports < MIN_SOL ? 'This wallet needs about 0.005 SOL on Solana for the fee.' : null,
+    !recipient ? 'That Acrux address is not valid.' : null,
+  ].filter(Boolean) as string[]
+
+  async function bridge() {
+    setErr(null); setBusy(true)
+    try {
+      const seq = await acruxBridgeNextSequence(sol)
+      const tx = new Transaction().add(acruxBridgeDeposit({ depositor: from!, recipient: recipient!, amount: raw!, sequence: seq }))
+      tx.feePayer = from!
+      tx.recentBlockhash = (await sol.getLatestBlockhash('confirmed')).blockhash
+      const before = BigInt(await w.conn.getBalance(recipient!).catch(() => 0))
+      const { signature } = await solanaWallet()!.signAndSendTransaction(tx)
+      setSent({ sig: signature, amount: raw!, to: recipient!, before, arrived: false })
+      setAmt('')
+      setTimeout(() => setTick(x => x + 1), 4000)
+    } catch (e: any) {
+      const m = e?.message ?? String(e)
+      setErr(/seeds|ConstraintSeeds|2006/.test(m) ? 'Someone else bridged at the same moment. Try again.' : m)
+    } finally { setBusy(false) }
   }
-  const { config, routes, decimals, mine } = data.data
-  const route = routes[routeIdx]?.account
-  const dec = route ? decimals[route.localMint.toBase58()] : 6
-  const raw = parseAmount(amount, dec)
-  const recipient = (() => { try { return to.trim() ? new PublicKey(to.trim()) : w.publicKey } catch { return null } })()
 
   return (
-    <div className="grid">
+    <div className="narrow">
+      <div className="page-head"><div>
+        <h1>Bridge</h1>
+        <p>Bring ACRUX from Solana to Acrux. 1 ACRUX on Solana becomes 1 ACRUX on Acrux, usually within a minute.</p>
+      </div></div>
+
       <div className="card">
-        <h2>Bridge</h2>
-        {config.paused && <p className="error">The bridge is paused by a guardian.</p>}
-        {!routes.length ? <Empty>No tokens registered yet.</Empty> : (
+        {!wallet ? (
+          <p className="muted" style={{ margin: 0 }}>
+            {inApp
+              ? 'Bridging needs a Solana wallet. Open acruxhub.com in Phantom’s browser or on a computer with Phantom or Backpack.'
+              : 'Bridging needs a Solana wallet such as Phantom or Backpack. Install one, then reload this page.'}
+          </p>
+        ) : !from ? (
           <>
-            <div className="field">
-              <label>Token</label>
-              <select value={routeIdx} onChange={e => setRouteIdx(Number(e.target.value))}>
-                {routes.map((r, i) => (
-                  <option key={r.publicKey.toBase58()} value={i}>
-                    {tokenLabel(r.account.localMint.toBase58())} → {CHAIN_NAME[r.account.remoteChain] ?? `chain ${r.account.remoteChain}`} ({r.account.native ? 'lock' : 'burn'})
-                  </option>
-                ))}
-              </select>
+            <p className="muted" style={{ marginTop: 0 }}>Connect the Solana wallet that holds your ACRUX.</p>
+            <button className="primary" style={{ width: '100%', height: 44 }} onClick={() => wallet.connect().then(r => setFrom(new PublicKey(r.publicKey.toString())), e => setErr(e.message))}>Connect Solana wallet</button>
+          </>
+        ) : (
+          <>
+            <div className="token-box">
+              <div className="token-box-head"><span>From Solana</span>
+                <button className="ghost" style={{ padding: 0 }} onClick={() => balances.data && setAmt(fmt(balances.data.acrux, ACRUX_SOLANA_DECIMALS, ACRUX_SOLANA_DECIMALS).replace(/,/g, ''))}>
+                  You have <span className="num">{balances.data ? fmt(balances.data.acrux, ACRUX_SOLANA_DECIMALS, 2) : '…'}</span> ACRUX
+                </button>
+              </div>
+              <div className="token-box-row">
+                <input inputMode="decimal" value={amt} onChange={e => setAmt(e.target.value)} placeholder="0" aria-label="ACRUX to bridge" />
+                <span className="token-badge">ACRUX</span>
+              </div>
             </div>
-            <div className="field"><label>Amount</label><input value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.0" /></div>
-            <div className="field"><label>Recipient on {CHAIN_NAME[route.remoteChain]} (defaults to your address)</label><input className="mono" value={to} onChange={e => setTo(e.target.value)} placeholder={w.publicKey?.toBase58() ?? ''} /></div>
-            <dl className="kv">
-              <dt>Guardians</dt><dd>{config.threshold} of {config.guardians.length} must approve</dd>
-              <dt>Daily cap</dt><dd>{fmt(BigInt(route.dailyCap.toString()), dec)}</dd>
-            </dl>
-            <div style={{ marginTop: 12 }}>
-              <Action
-                label="Bridge"
-                disabled={!w.publicKey || !raw || !recipient || config.paused}
-                run={async () => {
-                  const b = bridgeProgram(w.provider!)
-                  const fresh = await b.account.config.fetch(bridgeConfig())
-                  const tx = await b.methods.send(new BN(raw!.toString()), recipient!)
-                    .accountsPartial({
-                      user: w.publicKey!, mint: route.localMint,
-                      userTokens: getAssociatedTokenAddressSync(route.localMint, w.publicKey!),
-                      custody: route.native ? bridgeCustody(route.localMint) : null,
-                      outbound: outboundAddress(BigInt(fresh.nextNonce.toString())),
-                    })
-                    .transaction()
-                  const sig = await w.send(tx)
-                  setAmount('')
-                  w.bump()
-                  return `Sent as transfer #${fresh.nextNonce.toString()}. Guardians deliver it after the source chain finalizes. ${sig}`
-                }}
-              />
+            <div className="flip" aria-hidden="true">↓</div>
+            <div className="token-box">
+              <div className="token-box-head"><span>To Acrux</span><button className="ghost" style={{ padding: 0 }} onClick={() => setEditTo(x => !x)}>{editTo ? 'Use my address' : 'Send somewhere else'}</button></div>
+              <div className="token-box-row">
+                <span className="num" style={{ fontSize: 22 }}>{raw ? fmt(raw, ACRUX_SOLANA_DECIMALS, 2) : '0'}</span>
+                <span className="token-badge">ACRUX</span>
+              </div>
+              {editTo
+                ? <input className="mono" value={to} onChange={e => setTo(e.target.value)} placeholder="Acrux address" spellCheck={false} style={{ marginTop: 8 }} />
+                : <small className="muted">Arrives at <span className="mono">{short(from, 6)}</span> on Acrux, your same address.</small>}
             </div>
+            {problems.length > 0 && amt && <p className="error" style={{ marginBottom: 0 }}>{problems[0]}</p>}
+            <button className="primary" style={{ width: '100%', height: 44, marginTop: 14 }} disabled={busy || problems.length > 0} onClick={bridge}>
+              {busy ? 'Confirm in your wallet…' : `Bridge${raw ? ` ${fmt(raw, ACRUX_SOLANA_DECIMALS, 2)}` : ''} ACRUX`}
+            </button>
+            <p className="faint" style={{ fontSize: 12, margin: '10px 0 0' }}>From <span className="mono">{short(from)}</span> · network fee under 0.005 SOL · sent through Acrux’s own bridge</p>
           </>
         )}
+        {err && <p className="error">{err}</p>}
       </div>
-      <div className="card">
-        <h2>Your transfers</h2>
-        {!mine.length ? <Empty>None yet.</Empty> : (
-          <table>
-            <thead><tr><th>#</th><th>Amount</th><th>To</th><th>Status</th></tr></thead>
-            <tbody>
-              {mine.map(o => {
-                const n = o.account.nonce.toString()
-                const done = delivered.data?.[n]
-                return (
-                  <tr key={n}>
-                    <td>{n}</td>
-                    <td>{fmt(BigInt(o.account.amount.toString()), 6)}</td>
-                    <td>{CHAIN_NAME[o.account.destChain]}<br /><small className="mono">{short(o.account.recipient)}</small></td>
-                    <td>{done === undefined ? '…' : done ? <span className="pill good">delivered</span> : <span className="pill cyan">awaiting guardians</span>}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+
+      {sent && (
+        <div className="card">
+          <h2 style={{ marginBottom: 10 }}>{sent.arrived ? 'Arrived on Acrux ✓' : 'On its way…'}</h2>
+          <ol className="muted" style={{ margin: 0, paddingLeft: 18, lineHeight: 1.9 }}>
+            <li>Locked on Solana · <a href={`https://solscan.io/tx/${sent.sig}`} target="_blank" rel="noopener noreferrer">view</a></li>
+            <li>{sent.arrived ? <>Credited <strong className="num">{fmt(sent.amount, ACRUX_SOLANA_DECIMALS, 2)} ACRUX</strong> to <span className="mono">{short(sent.to)}</span> on Acrux</> : 'Waiting for Acrux to credit it (usually under a minute)'}</li>
+          </ol>
+          {sent.arrived && <p style={{ marginBottom: 0 }}><a href="#Launch">Go trade →</a></p>}
+        </div>
+      )}
+
+      <p className="faint" style={{ fontSize: 12 }}>
+        Going back from Acrux to Solana isn’t open yet: it needs Solana to certify Acrux’s blocks first. Only bridge what you’re happy to keep on Acrux for now.
+        The bridge is run by Acrux; <a href="https://acrux.computer/bridge" target="_blank" rel="noopener noreferrer">their page</a> shows every transfer.
+      </p>
     </div>
   )
 }
