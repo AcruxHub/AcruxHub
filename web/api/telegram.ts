@@ -12,9 +12,6 @@
 // header, so only Telegram can call this), TELEGRAM_BOT_USERNAME, TELEGRAM_GROUP_ID.
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import * as anchor from '@coral-xyz/anchor'
-import { Connection, Keypair, PublicKey } from '@solana/web3.js'
-import idl from '../../sdk/src/idl/acruxhub_launchpad.json' with { type: 'json' }
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? ''
 const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? ''
@@ -24,6 +21,9 @@ const SITE = 'https://acruxhub.com'
 const RPC = 'https://rpc.acrux.computer'
 const WRAPPED_ACRUX = 'So11111111111111111111111111111111111111112'
 const AXB = '28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td'
+const LAUNCHPAD = '3qCdE6gNWinKpPX71JZk8DGe2AYsYaVg6v8WB7N3SKrd'
+// Launch account discriminator (sdk/src/idl/acruxhub_launchpad.json).
+const LAUNCH_DISC = Buffer.from([144, 51, 51, 163, 206, 85, 213, 38])
 
 // ---------------------------------------------------------------- Telegram API
 async function tg(method: string, body: Record<string, unknown>) {
@@ -50,32 +50,61 @@ function action(text: string, route: string, privateChat: boolean) {
 // ---------------------------------------------------------------- chain data
 type Coin = { mint: string; name: string; symbol: string; uri: string; price: number; mcap: number; progress: number; raised: number; target: number; quote: string; graduated: boolean; complete: boolean }
 
+// Plain JSON-RPC and a hand decoder: Solana's JS libraries don't load in Vercel's
+// function runtime (rpc-websockets requires an ESM-only uuid), and this only reads.
+async function rpc<T>(method: string, params: unknown[]): Promise<T> {
+  const r = await fetch(RPC, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) })
+  const j: any = await r.json()
+  if (j.error) throw new Error(j.error.message)
+  return j.result
+}
+
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+function b58(bytes: Uint8Array) {
+  let n = BigInt('0x' + (Buffer.from(bytes).toString('hex') || '0'))
+  let out = ''
+  while (n > 0n) { out = B58[Number(n % 58n)] + out; n /= 58n }
+  for (const b of bytes) { if (b !== 0) break; out = '1' + out }
+  return out
+}
+
+/** Decodes a Launch account (field order from the IDL). Null if it isn't one. */
+function decodeLaunch(d: Buffer) {
+  if (d.length < 270 || !d.subarray(0, 8).equals(LAUNCH_DISC)) return null
+  const pk = (o: number) => b58(d.subarray(o, o + 32))
+  const u64 = (o: number) => d.readBigUInt64LE(o)
+  let o = 261
+  const str = () => { const n = d.readUInt32LE(o); const v = d.subarray(o + 4, o + 4 + n).toString('utf8'); o += 4 + n; return v }
+  return {
+    mint: pk(40), curveQuote: pk(104),
+    virtualQuote: u64(208), virtualTokens: u64(216), realQuote: u64(224), graduationQuote: u64(240),
+    complete: d[250] === 1, graduated: d[251] === 1,
+    name: str(), symbol: str(), uri: str(),
+  }
+}
+
 let cache: { at: number; coins: Coin[] } | null = null
 async function coins(): Promise<Coin[]> {
   if (cache && Date.now() - cache.at < 20_000) return cache.coins
-  const conn = new Connection(RPC, 'confirmed')
-  const lp = new anchor.Program(idl as anchor.Idl, new anchor.AnchorProvider(conn, new anchor.Wallet(Keypair.generate()), {}))
-  // Acrux's getProgramAccounts ignores filters: read everything and keep what decodes as a launch.
-  const raw = await conn.getProgramAccounts(lp.programId)
-  const launches: any[] = []
-  for (const r of raw) { try { launches.push(lp.coder.accounts.decode('launch', r.account.data)) } catch { /* not a launch */ } }
+  // Acrux's getProgramAccounts ignores filters: read everything and keep the launches.
+  const raw = await rpc<any[]>('getProgramAccounts', [LAUNCHPAD, { encoding: 'base64' }])
+  const launches = raw.map(r => decodeLaunch(Buffer.from(r.account.data[0], 'base64'))).filter(x => x !== null)
   // Each curve's quote token, from its curve_quote token account (mint at offset 0).
-  const qAccs = await conn.getMultipleAccountsInfo(launches.map(l => l.curveQuote))
-  const qMints = qAccs.map(a => (a ? new PublicKey(a.data.subarray(0, 32)).toBase58() : AXB))
+  const many = async (keys: string[]) => (await rpc<any>('getMultipleAccounts', [keys, { encoding: 'base64' }])).value as any[]
+  const qMints = (await many(launches.map(l => l.curveQuote))).map(a => (a ? b58(Buffer.from(a.data[0], 'base64').subarray(0, 32)) : AXB))
   const uniq = [...new Set(qMints)]
-  const decs = new Map(uniq.map((m, i) => [m, 0]))
-  const mintAccs = await conn.getMultipleAccountsInfo(uniq.map(m => new PublicKey(m)))
-  mintAccs.forEach((a, i) => decs.set(uniq[i], a ? a.data[44] : 6))
+  const decs = new Map<string, number>()
+  ;(await many(uniq)).forEach((a, i) => decs.set(uniq[i], a ? Buffer.from(a.data[0], 'base64')[44] : 6))
   const out = launches.map((l, i) => {
     const qd = decs.get(qMints[i]) ?? 6
     const vq = Number(l.virtualQuote) / 10 ** qd, vt = Number(l.virtualTokens) / 1e6
     const price = vt > 0 ? vq / vt : 0
     const target = Number(l.graduationQuote) / 10 ** qd, raised = Number(l.realQuote) / 10 ** qd
     return {
-      mint: l.mint.toBase58(), name: l.name, symbol: l.symbol, uri: l.uri, price, mcap: price * 1e9,
+      mint: l.mint, name: l.name, symbol: l.symbol, uri: l.uri, price, mcap: price * 1e9,
       progress: target > 0 ? Math.min(1, raised / target) : 0, raised, target,
       quote: qMints[i] === WRAPPED_ACRUX ? 'ACRUX' : qMints[i] === AXB ? 'AXB' : qMints[i].slice(0, 4),
-      graduated: !!l.graduated, complete: !!l.complete,
+      graduated: l.graduated, complete: l.complete,
     }
   })
   cache = { at: Date.now(), coins: out }
