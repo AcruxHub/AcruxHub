@@ -198,6 +198,8 @@ async function onMessage(m: any) {
       reply_markup: { inline_keyboard: [[action('🚀 Open AcruxHub', 'Launch', priv)], [action('➕ Launch a coin', 'Launch/new', priv), action('🌉 Bridge', 'Bridge', priv)]] },
     })
   }
+  // In a group or channel the bot was added to, /chatid tells the owner its id (for TELEGRAM_GROUP_ID).
+  if (cmd === '/chatid' && !priv) return tg('sendMessage', { chat_id: chat, text: `Chat id: ${chat}` })
   if (cmd === '/help') return tg('sendMessage', { chat_id: chat, text: HELP, parse_mode: 'HTML' })
   if (cmd === '/launch') return tg('sendMessage', { chat_id: chat, text: 'Launch a coin: fixed supply, no presale, liquidity locked forever at graduation.', reply_markup: { inline_keyboard: [[action('➕ Launch a coin', 'Launch/new', priv)]] } })
   if (cmd === '/bridge') return tg('sendMessage', { chat_id: chat, text: 'Bring ACRUX over from Solana. On Acrux it\'s your gas.', reply_markup: { inline_keyboard: [[action('🌉 Open the bridge', 'Bridge', priv)]] } })
@@ -253,12 +255,50 @@ async function onCallback(q: any) {
   return tg('editMessageText', { chat_id: chat, message_id: q.message.message_id, ...challenge(q.from.id) })
 }
 
+/**
+ * One-time setup and status, run from Vercel (some networks can't reach the Bot API):
+ * GET /api/telegram?op=setup|status with header x-setup-secret = the webhook secret.
+ * setup points the webhook here and sets the command menu and the Mini App menu button.
+ */
+async function setup(op: string, host: string) {
+  if (op === 'status') return { me: await tg('getMe', {}), webhook: await tg('getWebhookInfo', {}) }
+  if (op === 'setup') {
+    return {
+      webhook: await tg('setWebhook', { url: `https://${host}/api/telegram`, secret_token: SECRET, allowed_updates: ['message', 'callback_query', 'my_chat_member'], drop_pending_updates: true }),
+      commands: await tg('setMyCommands', { commands: [
+        { command: 'coins', description: 'Top coins on the launchpad' },
+        { command: 'coin', description: 'Look up a coin by ticker or CA' },
+        { command: 'launch', description: 'Launch a coin' },
+        { command: 'swap', description: 'Swap any token' },
+        { command: 'bridge', description: 'Bring ACRUX over from Solana' },
+        { command: 'help', description: 'What the bot does' },
+      ] }),
+      menu: await tg('setChatMenuButton', { menu_button: { type: 'web_app', text: 'AcruxHub', web_app: { url: SITE } } }),
+      description: await tg('setMyDescription', { description: 'Launch, trade and bridge coins on Acrux. Trades open AcruxHub right inside Telegram, and your wallet key stays in your phone\'s secure storage: this bot never sees it.' }),
+      short: await tg('setMyShortDescription', { short_description: 'Launch, trade and bridge on Acrux. Your keys stay on your phone.' }),
+    }
+  }
+  return { error: 'unknown op' }
+}
+
+/** Groups and channels the bot was added to, remembered from my_chat_member updates (logged). */
+function logChat(u: any) {
+  const c = u.my_chat_member?.chat
+  if (c) console.log(`bot membership: ${c.type} "${c.title}" id ${c.id} -> ${u.my_chat_member.new_chat_member?.status}`)
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method === 'GET' && req.query.op) {
+    const got = String(req.headers['x-setup-secret'] ?? '')
+    if (!SECRET || got.length !== SECRET.length || !timingSafeEqual(Buffer.from(got), Buffer.from(SECRET))) return res.status(401).end()
+    return res.status(200).json(await setup(String(req.query.op), String(req.headers.host)))
+  }
   if (req.method !== 'POST') return res.status(405).end()
   const got = String(req.headers['x-telegram-bot-api-secret-token'] ?? '')
   if (!SECRET || got.length !== SECRET.length || !timingSafeEqual(Buffer.from(got), Buffer.from(SECRET))) return res.status(401).end()
   const u = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
   try {
+    logChat(u)
     if (u.message) await onMessage(u.message)
     else if (u.callback_query) await onCallback(u.callback_query)
   } catch (e) {
