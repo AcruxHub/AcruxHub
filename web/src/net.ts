@@ -92,5 +92,4 @@ export const GAS_SWITCH_TIME = 'about 22:00 UTC on Nov 20'
  * New coin launches are paused while the launchpad moves from pricing in the
  * faucet's AXB to real ACRUX. Existing coins keep trading. Set to null to reopen.
  */
-export const LAUNCHES_PAUSED: string | null =
-  'New launches are paused while the launchpad moves from pricing in AXB (the faucet\'s demo token) to real ACRUX. Coins already launched keep trading. Back soon.'
+export const LAUNCHES_PAUSED: string | null = null
