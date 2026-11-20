@@ -283,7 +283,16 @@ async function setup(op: string, host: string) {
     return { posted: sent?.message_id ?? null }
   }
   if (op === 'setup') {
+    // Before switching to the webhook, read the updates queued so far: they include
+    // the bot being added to the community group, which gives the group's id.
+    const ups: any[] = (await tg('getUpdates', { allowed_updates: ['my_chat_member', 'message'] })) ?? []
+    const chats = new Map<number, string>()
+    for (const u of ups) {
+      const c = u.my_chat_member?.chat ?? u.message?.chat
+      if (c && c.type !== 'private') chats.set(c.id, `${c.type} ${c.title}`)
+    }
     return {
+      chats: Object.fromEntries(chats),
       webhook: await tg('setWebhook', { url: `https://${host}/api/telegram`, secret_token: SECRET, allowed_updates: ['message', 'callback_query', 'my_chat_member'], drop_pending_updates: true }),
       commands: await tg('setMyCommands', { commands: [
         { command: 'coins', description: 'Top coins on the launchpad' },
