@@ -14,6 +14,7 @@ import { Bridge } from './pages/Bridge.tsx'
 import { Explorer } from './pages/Explorer.tsx'
 import { Portfolio } from './pages/Portfolio.tsx'
 import { Docs } from './pages/Docs.tsx'
+import { Locks } from './pages/Locks.tsx'
 
 /** Official links. The X handle is set in one place so a rename is a one-line change. */
 export const SOCIAL = {
@@ -22,12 +23,13 @@ export const SOCIAL = {
 }
 
 // Routes are hash-based. #Launch stays the coins route so links people already shared keep working.
-const ROUTES = ['Launch', 'Swap', 'Pools', 'Bridge', 'Explorer', 'Portfolio', 'Docs'] as const
+const ROUTES = ['Launch', 'Swap', 'Pools', 'Locks', 'Bridge', 'Explorer', 'Portfolio', 'Docs'] as const
 type Route = (typeof ROUTES)[number]
 const NAV: { route: Route; label: string; icon: string }[] = [
   { route: 'Launch', label: 'Coins', icon: 'M12 2 3 7v10l9 5 9-5V7l-9-5Zm0 2.3L18.7 8 12 11.7 5.3 8 12 4.3ZM5 9.7l6 3.3v6.7l-6-3.3V9.7Zm8 10v-6.7l6-3.3v6.7l-6 3.3Z' },
   { route: 'Swap', label: 'Swap', icon: 'M7 7h11l-3-3 1.4-1.4L21.8 8l-5.4 5.4L15 12l3-3H7V7Zm10 10H6l3 3-1.4 1.4L2.2 16l5.4-5.4L9 12l-3 3h11v2Z' },
   { route: 'Pools', label: 'Pools', icon: 'M12 3c4.4 0 8 1.3 8 3v12c0 1.7-3.6 3-8 3s-8-1.3-8-3V6c0-1.7 3.6-3 8-3Zm6 11.4c-1.4.7-3.6 1.1-6 1.1s-4.6-.4-6-1.1V18c.2.3 2.4 1.5 6 1.5s5.8-1.2 6-1.5v-3.6Zm0-5c-1.4.7-3.6 1.1-6 1.1S7.4 10.1 6 9.4V12c.2.3 2.4 1.5 6 1.5s5.8-1.2 6-1.5V9.4ZM12 4.5C8.4 4.5 6.2 5.7 6 6c.2.3 2.4 1.5 6 1.5S17.8 6.3 18 6c-.2-.3-2.4-1.5-6-1.5Z' },
+  { route: 'Locks', label: 'Locks', icon: 'M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V11a1 1 0 0 1 1-1h1Zm2 0h6V7a3 3 0 0 0-6 0v3Zm3 4a1.5 1.5 0 0 0-1 2.6V18h2v-1.4a1.5 1.5 0 0 0-1-2.6Z' },
   { route: 'Explorer', label: 'Explorer', icon: 'M10 3a7 7 0 0 1 5.6 11.2l5.6 5.6-1.4 1.4-5.6-5.6A7 7 0 1 1 10 3Zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10Z' },
   { route: 'Portfolio', label: 'Portfolio', icon: 'M4 6h16a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm1 2v10h14v-3h-4a2 2 0 0 1 0-4h4V8H5Zm10 5h4v-1h-4v1ZM6 3h12v2H6V3Z' },
   { route: 'Docs', label: 'Docs', icon: 'M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm8 1.5V8h4.5L14 3.5ZM7 12h10v-1.5H7V12Zm0 4h10v-1.5H7V16Zm0-8h5V6.5H7V8Z' },
@@ -86,6 +88,7 @@ export function App() {
         {route === 'Explorer' && <Explorer />}
         {route === 'Portfolio' && <Portfolio />}
         {route === 'Docs' && <Docs />}
+        {route === 'Locks' && <Locks />}
         </PageBoundary>
       </main>
 
@@ -102,7 +105,7 @@ export function App() {
       </footer>
 
       <nav className="mobile-nav" aria-label="Main">
-        {NAV.slice(0, 5).map(n => (
+        {NAV.filter(n => ['Launch', 'Swap', 'Pools', 'Locks', 'Portfolio'].includes(n.route)).map(n => (
           <a key={n.route} href={`#${n.route}`} className={n.route === route ? 'on' : ''}>
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={n.icon} /></svg>
             {n.label}

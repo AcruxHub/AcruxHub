@@ -16,6 +16,7 @@ import { launchpadUpgraded, launchpadFor } from '../launchpad.ts'
 import { loadTrades, holdersFromTrades, ago, compact, fmtPrice, openingPrice, type Trade } from '../history.ts'
 import { PriceChart } from '../chart.tsx'
 import { wrapFor, spendable } from '../wrap.ts'
+import { useLocked, lockDate } from './Locks.tsx'
 
 type LaunchRow = { publicKey: PublicKey; account: any }
 type Quote = { quoteMint: PublicKey; quoteSym: string; qd: number }
@@ -265,6 +266,8 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
   const trades = useAsync(() => loadTrades(w.conn, program, l.publicKey), [w.conn, program, l.publicKey.toBase58(), w.refreshKey])
   const curveBal = useAsync(async () => BigInt((await w.conn.getTokenAccountBalance(a.curveTokens)).value.amount), [w.conn, a.curveTokens.toBase58(), w.refreshKey])
   const [tab, setTab] = useState<'trades' | 'holders' | 'about'>('trades')
+  const locked = useLocked(a.mint)
+  const lockedPct = locked.data && totalSupply > 0n ? (Number(locked.data.total) / Number(totalSupply)) * 100 : 0
 
   const pts = useMemo(() => {
     const ts = trades.data ?? []
@@ -294,6 +297,7 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
                 <span className="ca-row"><span className="mono">{short(a.mint, 6)}</span><CopyButton text={a.mint.toBase58()} /></span>
                 <span>by <a href={`#Explorer/${a.creator.toBase58()}`} className="mono">{short(a.creator)}</a></span>
                 <Links meta={meta} />
+                {lockedPct > 0 && <a className="pill good" href={`#Locks/${a.mint.toBase58()}`} title="Tokens locked on chain until a date">🔒 {lockedPct.toFixed(lockedPct < 1 ? 2 : 1)}% locked</a>}
               </div>
             </div>
           </div>
@@ -325,6 +329,7 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
                   <dt>Supply</dt><dd>{fmt(totalSupply, TOKEN_DECIMALS, 0)}, fixed</dd>
                   <dt>Trade fee</dt><dd>{a.feeBps / 100}%</dd>
                   <dt>Pairs with</dt><dd>{quoteSym}</dd>
+                  <dt>Locked</dt><dd>{locked.data?.count ? <>{lockedPct.toFixed(2)}% of supply in {locked.data.count} lock{locked.data.count === 1 ? '' : 's'}, first unlock {lockDate(locked.data.next!)}</> : 'none'} · <a href={`#Locks/${a.mint.toBase58()}`}>lock tokens</a></dd>
                   <dt>Mint</dt><dd><a href={`#Explorer/${a.mint.toBase58()}`}>{short(a.mint, 6)}</a></dd>
                   <dt>Launch account</dt><dd><a href={`#Explorer/${l.publicKey.toBase58()}`}>{short(l.publicKey, 6)}</a></dd>
                   {a.graduated && <><dt>Pool</dt><dd><a href={`#Explorer/${a.pool.toBase58()}`}>{short(a.pool, 6)}</a></dd></>}

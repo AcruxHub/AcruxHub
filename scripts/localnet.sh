@@ -7,7 +7,7 @@ set -e
 DEPLOY="${CARGO_TARGET_DIR:-$PWD/target}/deploy"
 AUTH=$(solana-keygen pubkey keys/dev-wallet.json)
 progs() {
-  for p in amm launchpad bridge wacrux; do
+  for p in amm launchpad bridge wacrux locker; do
     printf -- '--upgradeable-program %s %s %s ' "$(solana-keygen pubkey keys/acruxhub_$p-keypair.json)" "$DEPLOY/acruxhub_$p.so" "$AUTH"
   done
 }

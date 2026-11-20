@@ -9,10 +9,12 @@ import ammIdl from './idl/acruxhub_amm.json' with { type: 'json' }
 import launchpadIdl from './idl/acruxhub_launchpad.json' with { type: 'json' }
 import bridgeIdl from './idl/acruxhub_bridge.json' with { type: 'json' }
 import wacruxIdl from './idl/acruxhub_wacrux.json' with { type: 'json' }
+import lockerIdl from './idl/acruxhub_locker.json' with { type: 'json' }
 import type { AcruxhubAmm } from './idl/acruxhub_amm.ts'
 import type { AcruxhubLaunchpad } from './idl/acruxhub_launchpad.ts'
 import type { AcruxhubBridge } from './idl/acruxhub_bridge.ts'
 import type { AcruxhubWacrux } from './idl/acruxhub_wacrux.ts'
+import type { AcruxhubLocker } from './idl/acruxhub_locker.ts'
 import { sha256 } from '@noble/hashes/sha256'
 import { cpmmPoolAddresses, RAYDIUM_CPMM_AUTHORITY, RAYDIUM_CPMM_CREATE_FEE_RECEIVER, RAYDIUM_CPMM_ID } from './raydium.ts'
 
@@ -320,4 +322,43 @@ export function unwrapInstruction(program: Program<AcruxhubWacrux>, user: Public
   return program.methods.unwrap(new anchor.BN(amount.toString())).accountsPartial({
     user, vault: wacruxVault(), mint: wacruxMint(), userTokens: getAssociatedTokenAddressSync(wacruxMint(), user),
   }).instruction()
+}
+
+// ---- Token locks (programs/locker): lock any token until a date, provably ----
+export type { AcruxhubLocker }
+export const LOCKER_ID = new PublicKey(lockerIdl.address)
+export const lockerProgram = (p: Provider) => new Program<AcruxhubLocker>(lockerIdl as AcruxhubLocker, p)
+const u64le = (n: bigint | number) => { const b = new Uint8Array(8); new DataView(b.buffer).setBigUint64(0, BigInt(n), true); return b }
+export const lockAddress = (owner: PublicKey, mint: PublicKey, id: bigint | number) => pda([enc('lock'), owner.toBytes(), mint.toBytes(), u64le(id)], LOCKER_ID)
+
+export type TokenLockRow = { address: PublicKey; owner: PublicKey; mint: PublicKey; id: bigint; amount: bigint; lockedAt: number; unlockTs: number }
+
+/** Every lock on the chain (Acrux ignores RPC filters, so filter here). */
+export async function loadLocks(conn: Connection, program: Program<AcruxhubLocker>, f?: { mint?: PublicKey; owner?: PublicKey }): Promise<TokenLockRow[]> {
+  const raw = await conn.getProgramAccounts(LOCKER_ID)
+  const out: TokenLockRow[] = []
+  for (const r of raw) {
+    try {
+      const d: any = program.coder.accounts.decode('tokenLock', r.account.data)
+      if (f?.mint && !d.mint.equals(f.mint)) continue
+      if (f?.owner && !d.owner.equals(f.owner)) continue
+      out.push({ address: r.pubkey, owner: d.owner, mint: d.mint, id: BigInt(d.id.toString()), amount: BigInt(d.amount.toString()), lockedAt: Number(d.lockedAt), unlockTs: Number(d.unlockTs) })
+    } catch { /* not a lock */ }
+  }
+  return out.sort((a, b) => a.unlockTs - b.unlockTs)
+}
+
+/** Locks `amount` of `mint` from the owner's token account until `unlockTs` (unix seconds). */
+export function lockInstruction(program: Program<AcruxhubLocker>, owner: PublicKey, mint: PublicKey, id: bigint, amount: bigint, unlockTs: number) {
+  return program.methods.lock(new anchor.BN(id.toString()), new anchor.BN(amount.toString()), new anchor.BN(unlockTs)).accountsPartial({
+    owner, mint, lock: lockAddress(owner, mint, id), ownerTokens: getAssociatedTokenAddressSync(mint, owner),
+  }).instruction()
+}
+
+export function unlockInstruction(program: Program<AcruxhubLocker>, l: { owner: PublicKey; mint: PublicKey; address: PublicKey }) {
+  return program.methods.unlock().accountsPartial({ owner: l.owner, lock: l.address, mint: l.mint }).instruction()
+}
+
+export function extendInstruction(program: Program<AcruxhubLocker>, l: { owner: PublicKey; address: PublicKey }, newUnlockTs: number) {
+  return program.methods.extend(new anchor.BN(newUnlockTs)).accountsPartial({ owner: l.owner, lock: l.address }).instruction()
 }
