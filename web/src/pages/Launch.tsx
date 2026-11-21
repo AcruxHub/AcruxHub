@@ -314,7 +314,7 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
   const trades = useAsync(async () => {
     const [curve, pool] = await Promise.all([
       loadTrades(w.conn, program, l.publicKey),
-      a.graduated ? loadPoolTrades(w.conn, a.pool, a.mint).catch(() => []) : Promise.resolve([]),
+      a.graduated ? loadPoolTrades(w.conn, a.pool, a.mint).then(ts => ts.map(t => ({ ...t, pool: true }))).catch(() => [] as Trade[]) : Promise.resolve([] as Trade[]),
     ])
     return [...curve, ...pool].sort((x, y) => x.time - y.time)
   }, [w.conn, program, l.publicKey.toBase58(), a.graduated, w.refreshKey])
@@ -334,14 +334,26 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
     return out
   }, [trades.data, qd])
   const now = mk.price
-  // 24h change: against the last price at or before 24 hours ago. A coin younger than a
-  // day compares with its first trade (not the curve's opening price, which is tiny).
-  const dayAgo = useMemo(() => {
+  // 24h change: against the last price at or before 24 hours ago. A coin younger than a day
+  // has no such price, so it compares with where its market opened: the pool's price before
+  // its first swap for a graduated coin (the curve's launch price is a different, tiny market),
+  // else the first trade.
+  const { dayAgo, sinceOpen } = useMemo(() => {
+    const ts = trades.data ?? []
+    const scale = 10 ** (TOKEN_DECIMALS - qd)
     const cutoff = Date.now() / 1000 - 86_400
     let base: number | undefined
-    for (const p of pts.slice(1)) { if (p.time <= cutoff) base = p.value; else break }
-    return base ?? pts[1]?.value
-  }, [pts])
+    for (const t of ts) { if (t.time <= cutoff) base = t.price * scale; else break }
+    if (base) return { dayAgo: base, sinceOpen: false }
+    const firstPool = ts.find(t => t.pool)
+    if (firstPool) {
+      // Vault reserves before that swap: undo its deltas.
+      const vq = firstPool.vq + (firstPool.buy ? -1 : 1) * Number(firstPool.quote)
+      const vt = firstPool.vt + (firstPool.buy ? 1 : -1) * Number(firstPool.tokens)
+      if (vq > 0 && vt > 0) return { dayAgo: (vq / vt) * scale, sinceOpen: true }
+    }
+    return { dayAgo: ts[0] ? ts[0].price * scale : undefined, sinceOpen: true }
+  }, [trades.data, qd])
   const change = dayAgo ? (now / dayAgo - 1) * 100 : 0
   // Real balances from the chain; until they load (or if the read fails), fall back to curve trades.
   const chainHolders = useAsync(() => loadHolders(w.conn, a.mint, a.curveTokens, LOCKER_ID), [w.conn, a.mint.toBase58(), w.refreshKey])
@@ -369,7 +381,7 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
           <div className="stats">
             <div><span className="label">Market cap</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(mk.mcap * usdRate)}<small className="stat-sub">{compact(mk.mcap)} ACRUX</small></> : <>{compact(mk.mcap)} <small>{quoteSym}</small></>}</span></div>
             <div><span className="label">Price</span><span className="value"><Price text={fmtPrice(now)} />{usdRate && quoteSym === 'ACRUX' && <small className="stat-sub">≈ {usd(now * usdRate)}</small>}</span></div>
-            <div><span className="label">24h</span><span className={`value ${change >= 0 ? 'up' : 'down'}`}>{dayAgo ?`${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '–'}</span></div>
+            <div><span className="label" title={sinceOpen ? 'Under a day old: change since its market opened' : 'Change over the last 24 hours'}>{sinceOpen ? 'Since open' : '24h'}</span><span className={`value ${change >= 0 ? 'up' : 'down'}`}>{dayAgo ?`${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '–'}</span></div>
             <div><span className="label">Trades</span><span className="value">{trades.data ? trades.data.length : '…'}</span></div>
           </div>
 

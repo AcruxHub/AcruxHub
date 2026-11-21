@@ -17,6 +17,8 @@ export type Trade = {
   price: number
   vq: number
   vt: number
+  /** A swap in the coin's pool after graduation (vq/vt are then the pool's vault reserves). */
+  pool?: boolean
 }
 
 export async function loadTrades(conn: Connection, program: anchor.Program<any>, launch: PublicKey, limit = 300): Promise<Trade[]> {
