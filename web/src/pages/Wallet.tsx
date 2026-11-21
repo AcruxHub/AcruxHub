@@ -20,8 +20,13 @@ type Row = { id: string; mint: string | null; label: string; amount: bigint; dec
 export function Wallet() {
   const w = useWallet()
   // #Wallet/send/<mint> opens Send with that token picked.
-  // #Wallet/send/<token or native>/<to>/<amount> opens Send filled in (amount may use p for the decimal point).
-  const [, mode, preset, presetTo, presetAmt] = location.hash.slice(1).split('/')
+  // #Wallet/send/<token or native>/<to>/<amount> opens Send filled in; the token can be left
+  // out for ACRUX (#Wallet/send/<to>/<amount>, short enough for a Telegram link), and the
+  // amount may write the decimal point as p (0p1 = 0.1).
+  const parts = location.hash.slice(1).split('/')
+  const mode = parts[1]
+  const shortLink = parts.length === 4 && /^\d+(p\d+)?$/.test(parts[3])
+  const [preset, presetTo, presetAmt] = shortLink ? ['native', parts[2], parts[3]] : [parts[2], parts[3], parts[4]]
   const data = useAsync(async () => {
     if (!w.publicKey) return null
     const [lamports, toks, pools, symbols, prices, hidden] = await Promise.all([
