@@ -1,0 +1,26 @@
+name: HUB buy bot
+
+# Every 5 minutes, asks the site to post any new HUB buys to the Telegram group.
+# The endpoint only posts buys it hasn't posted before, so extra calls are harmless;
+# the site also calls it right after a swap, so buys made there show up at once.
+# GitHub runs scheduled workflows on a best-effort basis: this is the backup for
+# trades made outside acruxhub.com, and it can lag by several minutes.
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: buybot
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Post new HUB buys
+        run: curl -fsS --max-time 60 'https://acruxhub.com/api/telegram?op=buys'

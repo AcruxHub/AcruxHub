@@ -657,9 +657,98 @@ function logChat(u: any) {
   if (c) console.log(`bot membership: ${c.type} "${c.title}" id ${c.id} -> ${u.my_chat_member.new_chat_member?.status}`)
 }
 
+// ---------------------------------------------------------------- buy bot
+// GET /api/telegram?op=buys posts every new HUB buy in its pool to the group. It is
+// safe to call any time (it only posts swaps it hasn't posted before): the site calls
+// it right after a swap, and a GitHub Actions cron calls it every few minutes for
+// trades made anywhere else. The last pool signature it saw is kept in Blob.
+const HUB_POOL = 'CuJgjmm8Nk1muXywivaG4oPzPdgxvsAfEi6gRyHiPkwd'
+const HUB_POOL_AUTHORITY = 'GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL'
+const FEE_WALLET = '2sxQXf69KQuw4LiBy8QcDzK4r6w7jQDDkbP39Ltcm69X'
+const BUYBOT_STATE = 'buybot/hub.json'
+type BuyState = { last: string | null; seen: string[] }
+
+async function readBuyState(): Promise<BuyState> {
+  try {
+    const meta = await head(BUYBOT_STATE)
+    const j: any = await (await fetch(`${meta.url}?t=${Date.now()}`, { cache: 'no-store' })).json()
+    return { last: j?.last ?? null, seen: Array.isArray(j?.seen) ? j.seen : [] }
+  } catch { return { last: null, seen: [] } }
+}
+async function writeBuyState(st: BuyState) {
+  await put(BUYBOT_STATE, JSON.stringify(st), { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json', cacheControlMaxAge: 60 })
+}
+
+/** A swap's effect on the pool's two vaults, from the transaction's token balances. */
+async function poolSwap(sig: string) {
+  const tx: any = await rpc('getTransaction', [sig, { encoding: 'jsonParsed', maxSupportedTransactionVersion: 0, commitment: 'confirmed' }])
+  if (!tx || tx.meta?.err) return null
+  const delta = (mint: string) => {
+    const pick = (xs: any[]) => xs?.find(b => b.owner === HUB_POOL_AUTHORITY && b.mint === mint)
+    const pre = pick(tx.meta.preTokenBalances), post = pick(tx.meta.postTokenBalances)
+    if (!post) return null
+    const d = post.uiTokenAmount.decimals
+    const a = BigInt(post.uiTokenAmount.amount), b = BigInt(pre?.uiTokenAmount.amount ?? '0')
+    return { change: Number(a - b) / 10 ** d, after: Number(a) / 10 ** d }
+  }
+  const hub = delta(HUB), acrux = delta(WRAPPED_ACRUX)
+  if (!hub || !acrux) return null
+  const keys = tx.transaction.message.accountKeys
+  const buyer = typeof keys[0] === 'string' ? keys[0] : keys[0].pubkey
+  return { sig, buyer, hub, acrux, time: tx.blockTime as number | null }
+}
+
+const amount = (x: number) => x.toLocaleString('en-US', { maximumFractionDigits: x >= 100 ? 0 : 2 })
+
+async function buyCheck() {
+  const st = await readBuyState()
+  const sigs = await rpc<any[]>('getSignaturesForAddress', [HUB_POOL, st.last ? { limit: 25, until: st.last } : { limit: 1 }])
+  if (!sigs.length) return { posted: 0 }
+  const newest = sigs[0].signature
+  // First run: remember where we are, post nothing (no flood of old buys).
+  if (!st.last) { await writeBuyState({ last: newest, seen: [] }); return { posted: 0, started: newest } }
+  const fresh = sigs.filter(x => !x.err && !st.seen.includes(x.signature)).reverse()
+  // Save first, so a second caller right behind this one doesn't post the same buys.
+  await writeBuyState({ last: newest, seen: [...st.seen, ...fresh.map(x => x.signature)].slice(-60) })
+  if (!fresh.length) return { posted: 0 }
+  const [swaps, c] = await Promise.all([Promise.all(fresh.map(x => poolSwap(x.signature).catch(() => null))), coins().then(cs => cs.find(x => x.mint === HUB)).catch(() => undefined)])
+  let posted = 0
+  for (const sw of swaps) {
+    // A buy takes HUB out of the pool and puts ACRUX in. (Liquidity adds put both in.)
+    if (!sw || sw.hub.change >= 0 || sw.acrux.change <= 0) continue
+    const got = -sw.hub.change, paid = sw.acrux.change
+    const price = sw.hub.after > 0 ? sw.acrux.after / sw.hub.after : 0
+    const rate = c?.usdRate ?? null
+    const circulating = c && c.price > 0 ? c.mcap / c.price : 0
+    const mcap = price * circulating
+    const dots = Math.max(1, Math.min(30, Math.ceil(rate ? paid * rate : paid / 4000)))
+    const buyback = sw.buyer === FEE_WALLET
+    const text = [
+      buyback ? '🔥 <b>HUB Buyback!</b> (platform fees)' : '🟢 <b>HUB Buy!</b>',
+      (buyback ? '🔥' : '🟢').repeat(dots),
+      '',
+      `💸 <b>${amount(paid)} ACRUX</b>${rate ? ` (${usd(paid * rate)})` : ''}`,
+      `🪙 <b>${amount(got)} HUB</b>`,
+      `👤 <a href="${SITE}/#Explorer/${sw.buyer}">${sw.buyer.slice(0, 4)}…${sw.buyer.slice(-4)}</a> · <a href="${SITE}/#Explorer/${sw.sig}">Tx</a>`,
+      rate ? `📊 MC <b>${usd(mcap * rate)}</b> · Price ${usd(price * rate)}` : `📊 MC ${compact(mcap)} ACRUX · Price ${fmtPrice(price)} ACRUX`,
+    ].join('\n')
+    await tg('sendMessage', {
+      chat_id: GROUP, parse_mode: 'HTML', disable_web_page_preview: true, text,
+      reply_markup: { inline_keyboard: [[action('🟢 Buy HUB', `Swap/${HUB}`, false), action('📈 Chart', `Launch/${HUB}`, false)]] },
+    })
+    posted++
+  }
+  return { posted }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // The Mini App reporting its wallet address (checked against Telegram's signature).
   if (req.query.op === 'link') return linkEndpoint(req, res)
+  // The buy bot: public and idempotent (only posts buys it hasn't posted yet).
+  if (req.query.op === 'buys') {
+    if (!GROUP) return res.status(503).json({ error: 'no group' })
+    try { return res.status(200).json(await buyCheck()) } catch (e: any) { console.error('buybot failed', e); return res.status(500).json({ error: String(e?.message ?? e) }) }
+  }
   if (req.method === 'GET' && req.query.op) {
     const got = String(req.headers['x-setup-secret'] ?? '')
     if (!SECRET || got.length !== SECRET.length || !timingSafeEqual(Buffer.from(got), Buffer.from(SECRET))) return res.status(401).end()

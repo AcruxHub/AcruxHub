@@ -8,6 +8,10 @@ import { loadMarkets, launchSymbols, marketQuote, marketName, type Market } from
 import { fmt, parseAmount } from '../net.ts'
 import { Action, Empty } from '../ui.tsx'
 import { wrapFor, spendable, isNativeMint, unwrapNativeMint } from '../wrap.ts'
+import { API_BASE } from '../native.ts'
+
+/** AcruxHub's own coin: buys of it are announced in the Telegram group. */
+const HUB_MINT = 'AuVCwgJQRQP1EA655JLDP86uD7r6qEcQZRti4Htp5Uvp'
 
 const pairKey = (m: Market) => `${m.mintA.toBase58()}|${m.mintB.toBase58()}`
 const pct = (ppm: bigint) => `${(Number(ppm) / 10_000).toFixed(2)}%`
@@ -206,6 +210,9 @@ export function Swap() {
               const tx = new Transaction().add(...wrap, ...ixs, ...unwrap)
               const sealed = w.privateMode
               const sig = await w.send(tx)
+              // Nudge the Telegram buy bot so a HUB buy shows in the group right away
+              // (it only posts buys it hasn't posted; a cron covers trades made elsewhere).
+              if (outMint?.toBase58() === HUB_MINT) setTimeout(() => { fetch(`${API_BASE || location.origin}/api/telegram?op=buys`).catch(() => {}) }, 2500)
               setLastSend(sealed ? 'private' : 'public')
               setAmount('')
               w.bump()
