@@ -349,6 +349,23 @@ async function keyword(word: string, privateChat: boolean): Promise<Record<strin
     return { text: `🌐 ${LINKS.site}\nLaunch, trade, lock and bridge on Acrux.`, reply_markup: { inline_keyboard: [[action('🚀 Open AcruxHub', 'Launch', privateChat)]] } }
   }
   if (['tg', 'telegram', 'portal'].includes(w)) return { text: `💬 ${LINKS.tg}` }
+  if (['bot', 'the bot', 'tg bot', 'telegram bot', 'trading bot', 'how to trade', 'how do i trade', 'how to send', 'how do i send'].includes(w)) {
+    return {
+      parse_mode: 'HTML',
+      text: [
+        `🤖 <b>The AcruxHub bot: @${BOT}</b>`,
+        '',
+        'Your Acrux wallet inside Telegram:',
+        '• Bridge ACRUX from Solana',
+        '• Buy & sell in one tap',
+        '• Send and receive ACRUX, HUB or any Acrux token',
+        '• /wallet shows your balances (Acrux tokens don\'t show in Phantom, so check them here)',
+        '',
+        '🔐 Your key stays on your phone. The bot never sees it.',
+      ].join('\n'),
+      reply_markup: { inline_keyboard: [[{ text: '🤖 Open the bot', url: `https://t.me/${BOT}?start=go` }]] },
+    }
+  }
   if (['links', 'socials', 'social', 'official'].includes(w)) {
     return {
       parse_mode: 'HTML', disable_web_page_preview: true,
@@ -439,7 +456,13 @@ async function onMessage(m: any) {
     if (arg === 'wallet' && priv) return walletCommands(m, '/wallet', '', true)
     return tg('sendMessage', {
       chat_id: chat, text: HELP, parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [[action('💼 My wallet', 'Wallet', priv), action('🚀 Coins', 'Launch', priv)], [action('⇄ Swap', 'Swap', priv), action('➕ Launch a coin', 'Launch/new', priv)], [action('🌉 Bridge', 'Bridge', priv), action('🔒 Locks', 'Locks', priv)]] },
+      reply_markup: { inline_keyboard: [
+        [action('💼 My wallet', 'Wallet', priv), action('🚀 Coins', 'Launch', priv)],
+        // Send/Receive up front: tokens on Acrux don't show in Phantom, so this is where people move them.
+        [action('↑ Send', 'Wallet/send', priv), action('↓ Receive', 'Wallet/receive', priv)],
+        [action('⇄ Swap', 'Swap', priv), action('🌉 Bridge', 'Bridge', priv)],
+        [action('➕ Launch a coin', 'Launch/new', priv), action('🔒 Locks', 'Locks', priv)],
+      ] },
     })
   }
   // In a group or channel the bot was added to, /chatid tells the owner its id (for TELEGRAM_GROUP_ID).

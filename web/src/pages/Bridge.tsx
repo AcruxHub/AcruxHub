@@ -6,7 +6,7 @@
 //    same address on Solana and on Acrux, so it signs the deposit itself, no Phantom
 //    needed. Fund that address on Solana with ACRUX + a little SOL, then bridge.
 //  - an extension/app wallet (Phantom, Backpack) on the site.
-// Going back to Solana isn't open yet.
+// Going back to Solana happens on Acrux's own bridge page (open since 2026-11-21).
 import { useEffect, useMemo, useState } from 'react'
 import { Connection, PublicKey, Transaction } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
@@ -221,7 +221,7 @@ export function Bridge() {
       )}
 
       <p className="faint" style={{ fontSize: 12 }}>
-        Going back from Acrux to Solana isn’t open yet: it needs Solana to certify Acrux’s blocks first. Only bridge what you’re happy to keep on Acrux for now.
+        Going back to Solana works too, on <a href="https://acrux.computer/bridge" target="_blank" rel="noopener noreferrer">Acrux’s bridge page</a>: the ACRUX is burned on Acrux and paid out on Solana in about a minute, to the Solana address you enter there.
         {isTelegram ? ' Your key stays in this phone’s secure storage; the bot never sees it.' : ''}
         {' '}The bridge is run by Acrux; <a href="https://acrux.computer/bridge" target="_blank" rel="noopener noreferrer">their page</a> shows every transfer.
       </p>
