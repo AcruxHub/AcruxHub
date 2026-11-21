@@ -20,7 +20,8 @@ export const NETWORKS: Record<Network['id'], Network> = {
     rpc: 'https://rpc.acrux.computer',
     gateway: new AcruxGateway('https://rpc.acrux.computer', 'https://api.acrux.computer'),
     explorerNative: 'ACRUX',
-    feeRecipient: new PublicKey('AcXRKoSUCGACXU2ygruLFYMx26KdotYX9KHRcsNC2oBd'),
+    // AcruxHub's fee wallet: the buyback bot spends it (.github/workflows/fee-buyback.yml).
+    feeRecipient: new PublicKey('2sxQXf69KQuw4LiBy8QcDzK4r6w7jQDDkbP39Ltcm69X'),
   },
   local: {
     id: 'local',

@@ -1,0 +1,85 @@
+name: Fee buyback
+
+# Every 6 hours, spends the AcruxHub fee wallet's balance:
+#   40% to the owner (as plain ACRUX), 30% buys $HUB and burns it,
+#   30% adds $HUB/ACRUX liquidity (half bought as $HUB) and burns the LP.
+# $HUB that came in as fees (the site's fee on sells): 40% to the owner, the rest burned.
+# The script is scripts/hub-buyback.ts; it skips runs under BUYBACK_MIN ACRUX.
+#
+# It signs with the FEE WALLET's key (2sxQXf69KQuw4LiBy8QcDzK4r6w7jQDDkbP39Ltcm69X),
+# a wallet that only ever holds fees waiting for the next run. Never the treasury key.
+#
+# Off until all of these are set (repo Settings -> Secrets and variables -> Actions):
+#   secret   BUYBACK_KEY       contents of keys/acrux-buyback.json
+#   variable BUYBACK_OWNER     the Acrux address that receives the owner's 40%
+#   variable BUYBACK_ENABLED   true
+# optional variables BUYBACK_MIN (default 50 ACRUX), BUYBACK_OWNER_PCT (40),
+#   BUYBACK_PCT (30), BUYBACK_LIQUIDITY_PCT (30)
+
+on:
+  schedule:
+    - cron: '41 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fee-buyback
+  cancel-in-progress: false
+
+jobs:
+  buyback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check configuration
+        id: cfg
+        env:
+          ENABLED: ${{ vars.BUYBACK_ENABLED }}
+          OWNER: ${{ vars.BUYBACK_OWNER }}
+          HAS_KEY: ${{ secrets.BUYBACK_KEY != '' }}
+        run: |
+          missing=""
+          [ "$ENABLED" = "true" ] || missing="$missing BUYBACK_ENABLED"
+          [ -n "$OWNER" ] || missing="$missing BUYBACK_OWNER"
+          [ "$HAS_KEY" = "true" ] || missing="$missing BUYBACK_KEY"
+          if [ -n "$missing" ]; then
+            echo "Fee buyback not enabled yet (missing:$missing). Skipping." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v5
+        if: steps.cfg.outputs.run == 'true'
+
+      - uses: actions/setup-node@v5
+        if: steps.cfg.outputs.run == 'true'
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        if: steps.cfg.outputs.run == 'true'
+        run: npm ci --ignore-scripts
+
+      - name: Buyback, liquidity and payout
+        if: steps.cfg.outputs.run == 'true'
+        env:
+          RPC: https://rpc.acrux.computer
+          BUYBACK_KEY: ${{ secrets.BUYBACK_KEY }}
+          OWNER: ${{ vars.BUYBACK_OWNER }}
+          MIN: ${{ vars.BUYBACK_MIN || '50' }}
+          OWNER_PCT: ${{ vars.BUYBACK_OWNER_PCT || '40' }}
+          BUY_PCT: ${{ vars.BUYBACK_PCT || '30' }}
+          LIQ_PCT: ${{ vars.BUYBACK_LIQUIDITY_PCT || '30' }}
+        run: |
+          set -euo pipefail
+          key="$(mktemp)"
+          trap 'rm -f "$key"' EXIT
+          printf '%s' "$BUYBACK_KEY" > "$key"
+          KEY="$key" node --import tsx scripts/hub-buyback.ts \
+            AuVCwgJQRQP1EA655JLDP86uD7r6qEcQZRti4Htp5Uvp 8wkvan326WoFWuQzpezYqjiyR93KZAWJdA9GNqxkMxxT \
+            --owner "$OWNER" --owner-pct "$OWNER_PCT" --buyback "$BUY_PCT" --liquidity "$LIQ_PCT" \
+            --min "$MIN" --yes 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
