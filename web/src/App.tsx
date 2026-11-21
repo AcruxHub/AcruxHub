@@ -122,7 +122,8 @@ export function App() {
       </footer>
 
       <nav className="mobile-nav" aria-label="Main">
-        {NAV.filter(n => ['Launch', 'Swap', 'Wallet', 'Pools', 'Locks'].includes(n.route)).map(n => (
+        {/* Inside Telegram and the phone apps, Bridge takes Pools' spot: it's how people fund the wallet. */}
+        {NAV.filter(n => ['Launch', 'Swap', 'Wallet', inApp ? 'Bridge' : 'Pools', 'Locks'].includes(n.route)).map(n => (
           <a key={n.route} href={`#${n.route}`} className={n.route === route ? 'on' : ''}>
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={n.icon} /></svg>
             {n.label}

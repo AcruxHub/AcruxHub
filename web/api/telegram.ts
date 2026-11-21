@@ -277,7 +277,8 @@ async function walletCard(address: string, mine: boolean, privateChat: boolean) 
   const kb = mine && privateChat
     ? [
         [action('↑ Send', 'Wallet/send', true), action('↓ Receive', 'Wallet/receive', true), action('⇄ Swap', 'Swap', true)],
-        [{ text: '🔄 Refresh', callback_data: 'w:refresh' }, action('💼 Open wallet', 'Wallet', true)],
+        [action('🌉 Bridge from Solana', 'Bridge', true), action('💼 Open wallet', 'Wallet', true)],
+        [{ text: '🔄 Refresh', callback_data: 'w:refresh' }],
       ]
     : [[{ text: '🔎 View on AcruxHub', url: `${SITE}/#Explorer/${address}` }]]
   return { text: lines.join('\n'), parse_mode: 'HTML', reply_markup: { inline_keyboard: kb } }
