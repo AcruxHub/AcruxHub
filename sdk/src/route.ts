@@ -34,6 +34,8 @@ export async function routedSwapInstructions(a: {
   /** Fee receiver; without one no fee is taken. */
   feeRecipient?: PublicKey
   feeBps?: number
+  /** Holder discount, in bps off the fee. */
+  discountBps?: number
   /** Needed for AcruxHub AMM routes. */
   amm?: Program<AcruxhubAmm>
   deadlineSlot?: number
@@ -44,7 +46,7 @@ export async function routedSwapInstructions(a: {
   const inDec = a.aToB ? m.decimalsA : m.decimalsB
   const userIn = getAssociatedTokenAddressSync(inMint, a.user, false, inProg)
   const userOut = getAssociatedTokenAddressSync(outMint, a.user, false, outProg)
-  const { fee, net } = platformFee(a.amountIn, a.feeRecipient ? (a.feeBps ?? PLATFORM_FEE_BPS) : 0)
+  const { fee, net } = platformFee(a.amountIn, a.feeRecipient ? (a.feeBps ?? PLATFORM_FEE_BPS) : 0, a.discountBps ?? 0)
   if (net <= 0n) throw new Error('amount too small')
 
   const ixs: TransactionInstruction[] = [createAssociatedTokenAccountIdempotentInstruction(a.user, userOut, a.user, outMint, outProg)]

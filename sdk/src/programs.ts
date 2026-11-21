@@ -140,13 +140,23 @@ export const discountedFeeBps = (feeBps: number, discountBps: number) => Math.fl
  * What a trader passes as `holderTokens` and the discount it earns. The account is
  * null unless it exists and earns a discount (the program also accepts null).
  */
-export async function holderStatus(conn: Connection, program: Program<any>, user: PublicKey) {
+export async function holderStatus(conn: Connection, program: Program<any>, user: PublicKey, opts?: { countLocked?: Program<AcruxhubLocker> }) {
   const tiers = await loadHolderTiers(conn, program)
-  if (!tiers) return { tiers, account: null as PublicKey | null, balance: 0n, discountBps: 0, tierName: null as string | null }
+  if (!tiers) return { tiers, account: null as PublicKey | null, balance: 0n, locked: 0n, discountBps: 0, chainDiscountBps: 0, tierName: null as string | null }
   const ata = getAssociatedTokenAddressSync(tiers.mint, user)
-  const bal = await conn.getTokenAccountBalance(ata).then(r => BigInt(r.value.amount)).catch(() => 0n)
-  const discountBps = holderDiscountBps(tiers, bal)
-  return { tiers, account: discountBps > 0 ? ata : null, balance: bal, discountBps, tierName: holderTierName(tiers, bal) }
+  const [bal, locked] = await Promise.all([
+    conn.getTokenAccountBalance(ata).then(r => BigInt(r.value.amount)).catch(() => 0n),
+    // Platform tokens the user has in the token locker still count toward their tier.
+    opts?.countLocked
+      ? loadLocks(conn, opts.countLocked, { owner: user, mint: tiers.mint }).then(ls => ls.reduce((s, l) => s + l.amount, 0n)).catch(() => 0n)
+      : Promise.resolve(0n),
+  ])
+  const total = bal + locked
+  // The launchpad program only sees the wallet's own token account, so on-chain
+  // (curve) trades get chainDiscountBps; site fees use the total, locks included.
+  const chainDiscountBps = holderDiscountBps(tiers, bal)
+  const discountBps = holderDiscountBps(tiers, total)
+  return { tiers, account: chainDiscountBps > 0 ? ata : null, balance: bal, locked, discountBps, chainDiscountBps, tierName: holderTierName(tiers, total) }
 }
 
 export type CurveState = { virtualQuote: bigint; virtualTokens: bigint; realQuote: bigint; realTokens: bigint; graduationQuote: bigint; feeBps: number }

@@ -157,3 +157,16 @@ test('LP <-> token math matches Raydium SDK in both rounding directions', async 
     }
   }
 })
+
+test('platform fee: holder discounts are exact, not rounded down', () => {
+  // 99,000 ACRUX (9 decimals) at the Silver tier (66.67% off): 0.1% x 33.33% = 0.03333%.
+  const amt = 99_000_000_000_000n
+  assert.equal(platformFee(amt, 10, 6667).fee, 32_996_700_000n) // 32.9967 ACRUX, not 29.7
+  assert.equal(platformFee(amt, 10, 3334).fee, 65_993_400_000n) // Bronze: 65.9934 ACRUX
+  assert.equal(platformFee(amt, 10, 10_000).fee, 0n) // Gold: free
+  assert.equal(platformFee(amt, 10, 0).fee, 99_000_000_000n) // no tier: the full 0.1%
+  // Rounds up, so tiny trades still pay at least one base unit.
+  assert.equal(platformFee(1n, 10, 6667).fee, 1n)
+  const { fee, net } = platformFee(amt, 10, 6667)
+  assert.equal(fee + net, amt)
+})

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { PublicKey, Transaction } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
-import { ammProgram, minOut, launchAddress, platformFee, routedSwapInstructions, PLATFORM_FEE_BPS, holderStatus, discountedFeeBps, launchpadProgram } from '@acruxhub/sdk'
+import { ammProgram, minOut, launchAddress, platformFee, routedSwapInstructions, PLATFORM_FEE_BPS, holderStatus, launchpadProgram, lockerProgram } from '@acruxhub/sdk'
 import { useWallet, readProvider } from '../wallet.tsx'
 import { useAsync, tokenLabel } from '../hooks.ts'
 import { loadMarkets, launchSymbols, marketQuote, marketName, type Market } from '../data.ts'
@@ -75,10 +75,12 @@ export function Swap() {
   const slipBps = Math.round(Number(slip) * 100)
   const feeTo = w.network.feeRecipient
   // Platform-token holders get the same tiered discount on AcruxHub's swap fee.
-  const holder = useAsync(async () => (w.publicKey ? holderStatus(w.conn, launchpadProgram(readProvider(w.conn)), w.publicKey) : null), [w.publicKey?.toBase58(), w.conn, w.refreshKey])
+  // Locked platform tokens (in the token locker) count toward the tier too.
+  const holder = useAsync(async () => (w.publicKey ? holderStatus(w.conn, launchpadProgram(readProvider(w.conn)), w.publicKey, { countLocked: lockerProgram(readProvider(w.conn)) }) : null), [w.publicKey?.toBase58(), w.conn, w.refreshKey])
   const discount = holder.data?.discountBps ?? 0
-  const feeBps = discountedFeeBps(PLATFORM_FEE_BPS, discount)
-  const split = raw ? platformFee(raw, feeTo ? feeBps : 0) : null
+  // The fee after the discount, exact (a third off 0.1% is 0.0333%).
+  const feePct = (PLATFORM_FEE_BPS * (10_000 - discount)) / 10_000 / 100
+  const split = raw ? platformFee(raw, feeTo ? PLATFORM_FEE_BPS : 0, discount) : null
 
   // Quote every market for this pair and route to the one that pays the most.
   const routes = useMemo(() => {
@@ -173,7 +175,7 @@ export function Swap() {
               <dt>Route</dt><dd>{best ? <>{marketName(best.m)} <span className="muted">{pct(best.m.feePpm)}</span></> : '–'}</dd>
               <dt>Price impact</dt><dd>{best ? (impactBps / 100).toFixed(2) + '%' : '–'}</dd>
               <dt>Min received</dt><dd>{best ? fmt(minOut(best.out, slipBps), outDec) : '–'}</dd>
-              {feeTo && <><dt>AcruxHub fee</dt><dd>{split ? `${fmt(split.fee, inDec)} ${label(inMint)}` : `${feeBps / 100}%`}{discount > 0 && <small className="up"> {holder.data?.tierName ?? 'holder'} tier, {discount / 100}% off</small>}</dd></>}
+              {feeTo && <><dt>AcruxHub fee</dt><dd>{split ? `${fmt(split.fee, inDec)} ${label(inMint)}` : `${+feePct.toFixed(4)}%`}{discount > 0 && <small className="up"> {holder.data?.tierName ?? 'holder'} tier, {+(discount / 100).toFixed(2)}% off{holder.data && holder.data.locked > 0n ? ' (locked HUB counts)' : ''}</small>}</dd></>}
               <dt>Send</dt><dd>{w.privateMode ? <span className="pill good">private</span> : <span className="pill">public</span>}</dd>
             </dl>
           </div>
@@ -195,7 +197,7 @@ export function Swap() {
               setLastSend(null)
               const { ixs } = await routedSwapInstructions({
                 market: best!.m, user: w.publicKey!, aToB, amountIn: raw!, minOut: minOut(best!.out, slipBps),
-                feeRecipient: feeTo, feeBps, amm: ammProgram(w.provider!), deadlineSlot: (await w.conn.getSlot()) + 300,
+                feeRecipient: feeTo, feeBps: PLATFORM_FEE_BPS, discountBps: discount, amm: ammProgram(w.provider!), deadlineSlot: (await w.conn.getSlot()) + 300,
               })
               const m = best!.m
               const wrap = await wrapFor(w.conn, w.provider!, w.publicKey!, inMint!, raw!)

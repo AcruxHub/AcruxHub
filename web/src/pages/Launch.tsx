@@ -475,7 +475,8 @@ function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: La
   const raw = parseAmount(amt, side === 'buy' ? qd : TOKEN_DECIMALS)
   // Platform-token holders pay a smaller trade fee (upgraded launchpad only).
   const holder = useAsync(async () => (upgraded && w.publicKey ? holderStatus(w.conn, launchpadFor(w.provider ?? readProvider(w.conn), true), w.publicKey) : null), [upgraded, w.publicKey?.toBase58(), w.conn, w.refreshKey])
-  const discount = holder.data?.discountBps ?? 0
+  // Curve trades are priced by the program, which only counts the wallet's own tokens.
+  const discount = holder.data?.chainDiscountBps ?? 0
   const sd = useMemo(() => ({ ...s, feeBps: discountedFeeBps(s.feeBps, discount) }), [s, discount])
   const q = useMemo(() => (raw ? (side === 'buy' ? curveBuy(sd, raw) : curveSell(sd, raw)) : null), [raw, side, l, sd])
   const fee = a.feeRecipient as PublicKey

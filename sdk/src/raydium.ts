@@ -191,9 +191,12 @@ export function cpmmSwapInstruction(a: {
 /** AcruxHub's swap fee, taken from the input on every swap made through the site. */
 export const PLATFORM_FEE_BPS = 10
 
-/** Splits an input amount into AcruxHub's fee (rounded up) and what gets swapped. */
-export function platformFee(amountIn: bigint, bps = PLATFORM_FEE_BPS) {
-  const fee = bps > 0 && amountIn > 0n ? ceilDiv(amountIn * BigInt(bps), 10_000n) : 0n
+/** Splits an input amount into AcruxHub's fee (rounded up) and what gets swapped.
+ * A holder discount (bps off the fee) is applied at full precision, so a third off
+ * 0.1% is 0.0333%, not a rounded-down 0.03%. */
+export function platformFee(amountIn: bigint, bps = PLATFORM_FEE_BPS, discountBps = 0) {
+  const keep = BigInt(10_000 - Math.min(10_000, Math.max(0, discountBps)))
+  const fee = bps > 0 && amountIn > 0n && keep > 0n ? ceilDiv(amountIn * BigInt(bps) * keep, 100_000_000n) : 0n
   return { fee, net: amountIn - fee }
 }
 
