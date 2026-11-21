@@ -4,7 +4,7 @@ import { Transaction } from '@solana/web3.js'
 import { WACRUX } from '../hooks.ts'
 import { useWallet } from '../wallet.tsx'
 import { useAsync, holdings, tokenLabel } from '../hooks.ts'
-import { loadPools, launchSymbols } from '../data.ts'
+import { loadPools, launchSymbols, hiddenMints } from '../data.ts'
 import { fmt, GAS_SWITCH_SLOT, GAS_SWITCH_TIME } from '../net.ts'
 import { Action, Empty, NeedWallet } from '../ui.tsx'
 
@@ -12,13 +12,18 @@ export function Portfolio() {
   const w = useWallet()
   const data = useAsync(async () => {
     if (!w.publicKey) return null
-    const [lamports, toks, pools, symbols] = await Promise.all([
+    const [lamports, allToks, pools, symbols, hidden] = await Promise.all([
       w.conn.getBalance(w.publicKey),
       holdings(w.conn, w.publicKey),
       loadPools(w.conn).catch(() => []),
       launchSymbols(w.conn),
+      hiddenMints(w.conn),
     ])
-    return { lamports, toks, pools, symbols }
+    // Test coins and the old demo tokens are left out.
+    const hiddenPool = (p: { mintA: { toBase58(): string }; mintB: { toBase58(): string } }) => hidden.has(p.mintA.toBase58()) || hidden.has(p.mintB.toBase58())
+    const hiddenLp = new Set(pools.filter(hiddenPool).map(p => p.lpMint.toBase58()))
+    const toks = allToks.filter(t => !hidden.has(t.mint) && !hiddenLp.has(t.mint))
+    return { lamports, toks, pools: pools.filter(p => !hiddenPool(p)), symbols }
   }, [w.publicKey, w.conn, w.refreshKey])
   // Before Acrux's gas switch the faucet still works; after it, ACRUX comes over the bridge.
   const slot = useAsync(() => w.conn.getSlot(), [w.conn])

@@ -6,7 +6,7 @@ import { getAssociatedTokenAddressSync, getMint } from '@solana/spl-token'
 import { lockerProgram, loadLocks, lockInstruction, unlockInstruction, extendInstruction, type TokenLockRow } from '@acruxhub/sdk'
 import { useWallet, readProvider } from '../wallet.tsx'
 import { useAsync, tokenLabel } from '../hooks.ts'
-import { launchSymbols } from '../data.ts'
+import { launchSymbols, hiddenMints } from '../data.ts'
 import { fmt, parseAmount, short } from '../net.ts'
 import { Action, Empty, NeedWallet } from '../ui.tsx'
 
@@ -24,7 +24,11 @@ export function Locks() {
   const w = useWallet()
   const initial = decodeURIComponent(location.hash.split('/')[1] ?? '')
   const program = useMemo(() => lockerProgram(readProvider(w.conn)), [w.conn])
-  const locks = useAsync(() => loadLocks(w.conn, program), [w.conn, program, w.refreshKey])
+  // Locks of test coins (priced in the old demo tokens) aren't shown.
+  const locks = useAsync(async () => {
+    const [ls, hidden] = await Promise.all([loadLocks(w.conn, program), hiddenMints(w.conn)])
+    return ls.filter(l => !hidden.has(l.mint.toBase58()))
+  }, [w.conn, program, w.refreshKey])
   const symbols = useAsync(() => launchSymbols(w.conn), [w.conn])
   const mints = useAsync(async () => {
     const out = new Map<string, { decimals: number; supply: bigint }>()

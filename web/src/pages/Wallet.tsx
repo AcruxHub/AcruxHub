@@ -7,7 +7,7 @@ import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentIn
 import { wacruxProgram, unwrapInstruction } from '@acruxhub/sdk'
 import { useWallet } from '../wallet.tsx'
 import { useAsync, holdings, tokenLabel, WACRUX } from '../hooks.ts'
-import { loadPools, launchSymbols, acruxPrices } from '../data.ts'
+import { loadPools, launchSymbols, acruxPrices, hiddenMints } from '../data.ts'
 import { fmt, parseAmount, short } from '../net.ts'
 import { Action, CopyButton, Empty, NeedWallet } from '../ui.tsx'
 import { FEE_RESERVE } from '../wrap.ts'
@@ -23,14 +23,15 @@ export function Wallet() {
   const [, mode, preset] = location.hash.slice(1).split('/')
   const data = useAsync(async () => {
     if (!w.publicKey) return null
-    const [lamports, toks, pools, symbols, prices] = await Promise.all([
+    const [lamports, toks, pools, symbols, prices, hidden] = await Promise.all([
       w.conn.getBalance(w.publicKey),
       holdings(w.conn, w.publicKey),
       loadPools(w.conn).catch(() => []),
       launchSymbols(w.conn),
       acruxPrices(w.conn, WACRUX).catch(() => new Map<string, number>()),
+      hiddenMints(w.conn),
     ])
-    return { lamports: BigInt(lamports), toks, lpMints: new Set(pools.map(p => p.lpMint.toBase58())), symbols, prices }
+    return { lamports: BigInt(lamports), toks: toks.filter(t => !hidden.has(t.mint)), lpMints: new Set(pools.map(p => p.lpMint.toBase58())), symbols, prices }
   }, [w.publicKey?.toBase58(), w.conn, w.refreshKey])
   const [sendId, setSendId] = useState<string | null>(mode === 'send' ? (preset || NATIVE) : null)
   const [receive, setReceive] = useState(mode === 'receive')

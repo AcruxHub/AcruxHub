@@ -1,6 +1,6 @@
 import { PublicKey, type Connection } from '@solana/web3.js'
 import { getMint, getTransferFeeConfig, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
-import { ammProgram, launchpadProgram, launchConfig, allAccounts, swapOut, loadCpmm, cpmmSwapOut, cpmmFeePpm, cpmmSwapEnabled, RAYDIUM_CPMM_ID, type CpmmPool, type CpmmConfig } from '@acruxhub/sdk'
+import { ammProgram, launchpadProgram, launchConfig, allAccounts, swapOut, loadCpmm, cpmmSwapOut, cpmmFeePpm, cpmmSwapEnabled, RAYDIUM_CPMM_ID, wacruxMint, type CpmmPool, type CpmmConfig } from '@acruxhub/sdk'
 import { readProvider, } from './wallet.tsx'
 import { KNOWN_TOKENS } from './net.ts'
 
@@ -140,9 +140,10 @@ export async function loadRaydiumMarkets(conn: Connection): Promise<Market[]> {
 }
 
 export async function loadMarkets(conn: Connection): Promise<Market[]> {
-  const [amm, ray] = await Promise.all([
+  const [amm, ray, hidden] = await Promise.all([
     loadPools(conn).catch(() => [] as PoolInfo[]),
     loadRaydiumMarkets(conn).catch(() => [] as Market[]),
+    hiddenMints(conn),
   ])
   const ours: Market[] = amm.map(p => ({
     kind: 'acruxhub',
@@ -150,7 +151,44 @@ export async function loadMarkets(conn: Connection): Promise<Market[]> {
     decimalsA: p.decimalsA, decimalsB: p.decimalsB, reserveA: p.reserveA, reserveB: p.reserveB,
     feePpm: BigInt(p.feeBps) * 100n, swapEnabled: true, amm: p,
   }))
-  return [...ours, ...ray].filter(m => m.reserveA > 0n && m.reserveB > 0n)
+  // Only real markets: at least one side is real ACRUX (wrapped), and neither side is a
+  // test coin or demo token. Pools between two made-up tokens are leftover tests.
+  const acrux = wacruxMint().toBase58()
+  return [...ours, ...ray].filter(m =>
+    m.reserveA > 0n && m.reserveB > 0n &&
+    (m.mintA.toBase58() === acrux || m.mintB.toBase58() === acrux) &&
+    !hidden.has(m.mintA.toBase58()) && !hidden.has(m.mintB.toBase58()))
+}
+
+// ------------------------------------------------------------------ test coins (hidden everywhere)
+
+/** The faucet's demo tokens from before Acrux switched to real ACRUX (AXA, AXB). */
+const DEMO_MINTS = ['713QqmE1xGXS8vACKxfxyr5YvtitXymtiR45E3egsdss', '28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td']
+/** Our own launches that were replaced and never traded. */
+const RETIRED_COINS = ['99ysnj1KnpG6mpEZa1kjN8JCkjDZifpjWL6r4gUPKYjN']
+
+let hiddenCache: { at: number; set: Promise<Set<string>> } | null = null
+/** Every mint the site leaves out: the demo tokens, every coin launched against them
+ * (test coins, worth nothing), and retired launches. Cached for a minute. */
+export function hiddenMints(conn: Connection): Promise<Set<string>> {
+  if (hiddenCache && Date.now() - hiddenCache.at < 60_000) return hiddenCache.set
+  const set = (async () => {
+    const out = new Set([...DEMO_MINTS, ...Object.keys(KNOWN_TOKENS), ...RETIRED_COINS])
+    try {
+      const launches = await allAccounts<any>(launchpadProgram(readProvider(conn)), 'Launch')
+      for (let i = 0; i < launches.length; i += 99) {
+        const chunk = launches.slice(i, i + 99)
+        const infos = (await conn.getMultipleParsedAccounts(chunk.map(l => l.account.curveQuote as PublicKey))).value
+        chunk.forEach((l, j) => {
+          const quote = (infos[j]?.data as any)?.parsed?.info?.mint
+          if (quote && out.has(quote)) out.add(l.account.mint.toBase58())
+        })
+      }
+    } catch { /* keep the demo tokens hidden at least */ }
+    return out
+  })()
+  hiddenCache = { at: Date.now(), set }
+  return set
 }
 
 /** Exact output of swapping `amountIn` (after AcruxHub's fee) through a market. */

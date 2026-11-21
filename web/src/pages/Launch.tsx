@@ -21,7 +21,7 @@ import { useLocked, lockDate } from './Locks.tsx'
 type LaunchRow = { publicKey: PublicKey; account: any }
 type Quote = { quoteMint: PublicKey; quoteSym: string; qd: number }
 type View = { kind: 'board'; q: string } | { kind: 'create' } | { kind: 'coin'; key: string }
-type Tab = 'top' | 'new' | 'almost' | 'graduated' | 'test'
+type Tab = 'top' | 'new' | 'almost' | 'graduated'
 
 const TOKEN_DECIMALS = 6
 
@@ -95,6 +95,8 @@ export function Launch() {
     return q ? { quoteMint: q.mint, quoteSym: tokenLabel(q.mint.toBase58()), qd: q.decimals } : fallback
   }
   const totalSupply = BigInt(config.data.params.totalSupply.toString())
+  // Test coins (priced in the faucet's demo tokens, from before real ACRUX) are left out entirely.
+  const real = launches.data && launchQuotes.data ? launches.data.filter(l => !isTestCoin(quoteOf(l))) : null
   const pausedNote = paused.data ? 'The launchpad is paused for now: no new coins, buys, sells or graduations. Funds stay where they are.' : LAUNCHES_PAUSED
 
   if (view.kind === 'create') {
@@ -103,12 +105,12 @@ export function Launch() {
     return <Create pairs={pairs.data} upgraded={!!upgraded.data} onDone={key => { location.hash = key ? `#Launch/${key}` : '#Launch' }} />
   }
   if (view.kind === 'coin') {
-    const l = launches.data?.find(x => x.publicKey.toBase58() === view.key || x.account.mint.toBase58() === view.key)
-    if (!l) return launches.loading ? <BoardSkeleton /> : <div className="card empty">Coin not found. <a href="#Launch">Back to coins</a></div>
+    const l = real?.find(x => x.publicKey.toBase58() === view.key || x.account.mint.toBase58() === view.key)
+    if (!l) return !real ? <BoardSkeleton /> : <div className="card empty">Coin not found. <a href="#Launch">Back to coins</a></div>
     if (!launchQuotes.data || upgraded.data == null) return <BoardSkeleton />
     return <Coin l={l} {...quoteOf(l)} totalSupply={totalSupply} upgraded={upgraded.data} paused={!!paused.data} />
   }
-  return <Board launches={launches.data ?? null} loading={launches.loading} error={launches.error} quoteOf={quoteOf} totalSupply={totalSupply} query={view.q} pausedNote={pausedNote} paused={!!paused.data} />
+  return <Board launches={real} loading={launches.loading || launchQuotes.loading} error={launches.error} quoteOf={quoteOf} totalSupply={totalSupply} query={view.q} pausedNote={pausedNote} paused={!!paused.data} />
 }
 
 function PausedBanner({ paused, note }: { paused: boolean; note: string }) {
@@ -145,8 +147,7 @@ function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNo
   const needle = q.trim().toLowerCase()
   const everything = launches ?? []
   // Real coins first; the pre-switch test coins only show on their own tab.
-  const tests = everything.filter(l => isTestCoin(quoteOf(l)))
-  const all = everything.filter(l => !isTestCoin(quoteOf(l)))
+  const all = everything
   // A pasted CA that matches a coin opens it straight away.
   useEffect(() => {
     const hit = everything.find(l => l.account.mint.toBase58() === q.trim())
@@ -160,7 +161,6 @@ function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNo
     if (tab === 'top') return [...xs.filter(l => !l.account.graduated).sort((a, b) => progress(b) - progress(a)), ...xs.filter(l => l.account.graduated)]
     if (tab === 'new') return xs
     if (tab === 'almost') return xs.filter(l => !l.account.graduated && progress(l) >= 0.5).sort((a, b) => progress(b) - progress(a))
-    if (tab === 'test') return tests.filter(l => !needle || l.account.symbol.toLowerCase().includes(needle) || l.account.name.toLowerCase().includes(needle))
     return xs.filter(l => l.account.graduated)
   }, [filtered.length, tab, needle, launches])
   // The coin closest to graduating, not yet complete, gets the spotlight.
@@ -187,7 +187,7 @@ function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNo
       )}
       <div className="board-tools">
         <div className="seg" role="tablist" aria-label="Sort coins">
-          {([['top', 'Top'], ['new', 'New'], ['almost', 'About to graduate'], ['graduated', 'Graduated'], ...(tests.length ? [['test', 'Test coins']] : [])] as [Tab, string][]).map(([k, label]) => (
+          {([['top', 'Top'], ['new', 'New'], ['almost', 'About to graduate'], ['graduated', 'Graduated']] as [Tab, string][]).map(([k, label]) => (
             <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>
           ))}
         </div>
@@ -335,7 +335,6 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
   return (
     <>
       <p style={{ margin: '0 0 14px' }}><a href="#Launch" className="muted">← Coins</a></p>
-      {isTestCoin({ quoteMint, quoteSym, qd }) && <p className="notice warn" style={{ marginTop: 0 }}>Test coin from before Acrux switched to real ACRUX. It is priced in {quoteSym}, the faucet's demo token, which is worth nothing.</p>}
       <div className="coin-page">
         <div className="coin-main">
           <div className="coin-head">

@@ -94,6 +94,8 @@ function decodeLaunch(d: Buffer) {
 }
 
 let cache: { at: number; coins: Coin[] } | null = null
+/** Test coins (launched against the demo tokens) and retired launches: never shown. */
+const hiddenCoins = new Set<string>()
 async function coins(): Promise<Coin[]> {
   if (cache && Date.now() - cache.at < 20_000) return cache.coins
   // Acrux's getProgramAccounts ignores filters: read everything and keep the launches.
@@ -118,6 +120,7 @@ async function coins(): Promise<Coin[]> {
     }
   })
   const real = out.filter((c, i) => !DEMO.has(qMints[i]) && !HIDDEN.has(c.mint))
+  out.forEach((c, i) => { if (DEMO.has(qMints[i]) || HIDDEN.has(c.mint)) hiddenCoins.add(c.mint) })
   // Graduated coins trade in their Raydium pool: price them from its vaults.
   const grads = real.filter(c => c.graduated)
   const gi = grads.map(c => launches[out.indexOf(c)].pool)
@@ -252,7 +255,7 @@ async function balances(address: string): Promise<{ native: number; tokens: Bal[
     const i = a.account.data.parsed.info
     sums.set(i.mint, (sums.get(i.mint) ?? 0) + Number(i.tokenAmount.uiAmountString ?? i.tokenAmount.uiAmount ?? 0))
   }
-  const tokens: Bal[] = [...sums.entries()].filter(([, v]) => v > 0).map(([mint, amount]) => {
+  const tokens: Bal[] = [...sums.entries()].filter(([m, v]) => v > 0 && !DEMO.has(m) && !hiddenCoins.has(m)).map(([mint, amount]) => {
     if (mint === WRAPPED_ACRUX) return { mint, label: 'Wrapped ACRUX', amount, value: amount }
     const c = byMint.get(mint)
     return { mint, label: c ? '$' + c.symbol : `${mint.slice(0, 4)}…${mint.slice(-4)}`, amount, value: c && c.quote === 'ACRUX' ? amount * c.price : null }
