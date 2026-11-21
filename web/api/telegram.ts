@@ -666,6 +666,7 @@ const HUB_POOL = 'CuJgjmm8Nk1muXywivaG4oPzPdgxvsAfEi6gRyHiPkwd'
 const HUB_POOL_AUTHORITY = 'GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL'
 const FEE_WALLET = '2sxQXf69KQuw4LiBy8QcDzK4r6w7jQDDkbP39Ltcm69X'
 const BUYBOT_STATE = 'buybot/hub.json'
+const BUY_ANIMATION = `${SITE}/media/hub-buy.mp4`
 type BuyState = { last: string | null; seen: string[] }
 
 async function readBuyState(): Promise<BuyState> {
@@ -732,10 +733,11 @@ async function buyCheck() {
       `👤 <a href="${SITE}/#Explorer/${sw.buyer}">${sw.buyer.slice(0, 4)}…${sw.buyer.slice(-4)}</a> · <a href="${SITE}/#Explorer/${sw.sig}">Tx</a>`,
       rate ? `📊 MC <b>${usd(mcap * rate)}</b> · Price ${usd(price * rate)}` : `📊 MC ${compact(mcap)} ACRUX · Price ${fmtPrice(price)} ACRUX`,
     ].join('\n')
-    await tg('sendMessage', {
-      chat_id: GROUP, parse_mode: 'HTML', disable_web_page_preview: true, text,
-      reply_markup: { inline_keyboard: [[action('🟢 Buy HUB', `Swap/${HUB}`, false), action('📈 Chart', `Launch/${HUB}`, false)]] },
-    })
+    const reply_markup = { inline_keyboard: [[action('🟢 Buy HUB', `Swap/${HUB}`, false), action('📈 Chart', `Launch/${HUB}`, false)]] }
+    // The logo animation (web/public/media/hub-buy.mp4, plays as a looping GIF) with the
+    // buy as its caption; plain text if Telegram can't fetch it.
+    const sent = await tg('sendAnimation', { chat_id: GROUP, animation: BUY_ANIMATION, caption: text, parse_mode: 'HTML', reply_markup })
+    if (!sent) await tg('sendMessage', { chat_id: GROUP, parse_mode: 'HTML', disable_web_page_preview: true, text, reply_markup })
     posted++
   }
   return { posted }
