@@ -720,6 +720,10 @@ function Create({ pairs, upgraded, onDone }: { pairs: Pair[]; upgraded: boolean;
   const [drag, setDrag] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // HUB holders get their tier's discount on the launch buy too (the program checks the
+  // HUB account passed as holderTokens, so it has to be passed here as on a coin's page).
+  const holder = useAsync(async () => (upgraded && w.publicKey ? holderStatus(w.conn, launchpadFor(w.provider ?? readProvider(w.conn), true), w.publicKey) : null), [upgraded, w.publicKey?.toBase58(), w.conn, w.refreshKey])
+  const holderDiscount = holder.data?.chainDiscountBps ?? 0
   const buyRaw = firstBuy ? parseAmount(firstBuy, qd) : 0n
   const buyQuote = buyRaw ? curveBuy(freshCurve(params), buyRaw) : null
   const pick = (f: File | undefined) => {
@@ -785,7 +789,9 @@ function Create({ pairs, upgraded, onDone }: { pairs: Pair[]; upgraded: boolean;
         <dl className="kv" style={{ margin: '4px 0 16px' }}>
           <dt>Supply</dt><dd>{fmt(BigInt(params.totalSupply.toString()), TOKEN_DECIMALS, 0)}, fixed</dd>
           <dt>Graduates at</dt><dd>{fmt(BigInt(params.graduationQuote.toString()), qd)} {quoteSym} raised</dd>
-          <dt>Trade fee</dt><dd>{params.feeBps / 100}%</dd>
+          <dt>Trade fee</dt><dd>{holderDiscount > 0
+            ? <><s className="faint">{params.feeBps / 100}%</s> <strong className="up">{discountedFeeBps(params.feeBps, holderDiscount) / 100}%</strong> <small className="muted">{holder.data?.tierName ?? 'holder'} tier</small></>
+            : <>{params.feeBps / 100}%</>}</dd>
           <dt>Cost to create</dt><dd>network fees only</dd>
         </dl>
 
@@ -814,7 +820,7 @@ function Create({ pairs, upgraded, onDone }: { pairs: Pair[]; upgraded: boolean;
                       userTokens: getAssociatedTokenAddressSync(mint.publicKey, w.publicKey!),
                       userQuote: getAssociatedTokenAddressSync(quoteMint, w.publicKey!),
                       feeQuote: getAssociatedTokenAddressSync(quoteMint, feeRecipient, true),
-                      ...(upgraded ? { holderTokens: null } : {}),
+                      ...(upgraded ? { holderTokens: (await holderStatus(w.conn, lp, w.publicKey!)).account } : {}),
                     })
                     .instruction(),
                 ]

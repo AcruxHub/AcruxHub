@@ -4,7 +4,7 @@ These are the fees charged today, read straight from the code.
 
 | Where | Fee | Who receives it |
 |---|---|---|
-| Launchpad curve, buy and sell | **1%** | The AcruxHub fee wallet |
+| Launchpad curve, buy and sell | **1%** (less for HUB holders) | The AcruxHub fee wallet |
 | Swap, AcruxHub pool | the pool's fee tier (0.05%, 0.30% or 1.00%) | **100% to that pool's liquidity providers** |
 | Swap, Raydium pool | the pool's Raydium fee tier (0.25% on the most common one) | Raydium's split: mostly the pool's liquidity providers, part to Raydium |
 | Swap through acruxhub.com, any pool | **0.1%** of what you pay (less for HUB holders) | The AcruxHub fee wallet |
@@ -21,13 +21,15 @@ The site adds it to the swap transaction as a separate transfer, before the pool
 
 ## HUB holders pay less
 
-Holding HUB lowers the site's 0.1% swap fee. HUB in your wallet and HUB you've locked in a token lock both count:
+Holding HUB lowers your AcruxHub fees, on both the site's 0.1% swap fee and the launchpad's 1% curve fee:
 
-| Tier | HUB held | Discount on the 0.1% fee |
+| Tier | HUB held | Discount |
 |---|---|---|
 | Bronze | 10,000+ | a third off |
 | Silver | 100,000+ | two thirds off |
-| Gold | 1,000,000+ | no fee |
+| Gold | 1,000,000+ | no AcruxHub fee |
+
+On the 0.1% swap fee, HUB in your wallet and HUB you've locked in a token lock both count. On launchpad trades the launchpad program checks the HUB in your wallet, so a Silver holder pays 0.33% instead of 1% on the curve.
 
 ## Buyback and burn
 
