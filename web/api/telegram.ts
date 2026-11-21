@@ -27,7 +27,7 @@ const NATIVE_ACRUX = 'So11111111111111111111111111111111111111112'
 // Pre-switch demo tokens (worth nothing): coins priced in them are left out.
 const DEMO = new Set(['28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td', '713QqmE1xGXS8vACKxfxyr5YvtitXymtiR45E3egsdss'])
 // Launched by us, never traded, replaced by a later launch.
-const HIDDEN = new Set(['99ysnj1KnpG6mpEZa1kjN8JCkjDZifpjWL6r4gUPKYjN'])
+const HIDDEN = new Set(['99ysnj1KnpG6mpEZa1kjN8JCkjDZifpjWL6r4gUPKYjN', 'G5YtF3QoR5jT2EpLBxo1DKanoN2N6PsrznPJXpWhdvki'])
 const AXB = '28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td'
 const LAUNCHPAD = '3qCdE6gNWinKpPX71JZk8DGe2AYsYaVg6v8WB7N3SKrd'
 const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
