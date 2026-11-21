@@ -166,7 +166,7 @@ export async function loadMarkets(conn: Connection): Promise<Market[]> {
 /** The faucet's demo tokens from before Acrux switched to real ACRUX (AXA, AXB). */
 const DEMO_MINTS = ['713QqmE1xGXS8vACKxfxyr5YvtitXymtiR45E3egsdss', '28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td']
 // Retired launches: the unused first HUB, and PEPW (launched with a typo'd ticker, sold back and relaunched as PEPE).
-const RETIRED_COINS = ['99ysnj1KnpG6mpEZa1kjN8JCkjDZifpjWL6r4gUPKYjN', 'G5YtF3QoR5jT2EpLBxo1DKanoN2N6PsrznPJXpWhdvki']
+export const RETIRED_COINS = ['99ysnj1KnpG6mpEZa1kjN8JCkjDZifpjWL6r4gUPKYjN', 'G5YtF3QoR5jT2EpLBxo1DKanoN2N6PsrznPJXpWhdvki']
 
 let hiddenCache: { at: number; set: Promise<Set<string>> } | null = null
 /** Every mint the site leaves out: the demo tokens, every coin launched against them
