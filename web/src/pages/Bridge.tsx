@@ -1,6 +1,12 @@
-// Bridge ACRUX from Solana to Acrux, through Acrux's own bridge program: the
-// deposit is signed on Solana by the user's Solana wallet (Phantom, Backpack) and
-// arrives on Acrux as native ACRUX, 1:1. Going back to Solana isn't open yet.
+// Bridge ACRUX from Solana to Acrux, through Acrux's own bridge program: the deposit
+// is signed on Solana and arrives on Acrux as native ACRUX, 1:1.
+//
+// Two ways to sign the Solana side:
+//  - the app's own wallet (Telegram, the phone apps, a browser key): one key is the
+//    same address on Solana and on Acrux, so it signs the deposit itself, no Phantom
+//    needed. Fund that address on Solana with ACRUX + a little SOL, then bridge.
+//  - an extension/app wallet (Phantom, Backpack) on the site.
+// Going back to Solana isn't open yet.
 import { useEffect, useMemo, useState } from 'react'
 import { Connection, PublicKey, Transaction } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
@@ -8,9 +14,10 @@ import { acruxBridgeDeposit, acruxBridgeNextSequence, ACRUX_SOLANA_MINT, ACRUX_S
 import { useWallet } from '../wallet.tsx'
 import { useAsync } from '../hooks.ts'
 import { fmt, parseAmount, short } from '../net.ts'
-import { inApp, API_BASE } from '../native.ts'
+import { inApp, isTelegram, API_BASE, tap } from '../native.ts'
+import { CopyButton, NeedWallet } from '../ui.tsx'
 
-// Solana's public RPC refuses browsers, so reads go through our own /api/solana.
+// Solana's public RPC refuses browsers, so reads (and bridge sends) go through our /api/solana.
 const SOLANA_RPC = `${API_BASE || location.origin}/api/solana`
 const MIN_SOL = 5_000_000n // 0.005 SOL for the fee and the deposit record's rent
 
@@ -23,22 +30,39 @@ const solanaWallet = (): SolWallet | null => {
   return w.phantom?.solana ?? w.backpack ?? w.solana ?? null
 }
 
+/** Waits for a Solana signature to confirm (polling: our proxy has no websocket). */
+async function confirmSolana(sol: Connection, sig: string) {
+  for (let i = 0; i < 60; i++) {
+    const st = (await sol.getSignatureStatuses([sig]).catch(() => null))?.value[0]
+    if (st?.err) throw new Error(`The bridge deposit failed on Solana: ${JSON.stringify(st.err)}`)
+    if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) return
+    await new Promise(r => setTimeout(r, 2000))
+  }
+  throw new Error(`Not confirmed yet. Check it on Solscan: ${sig}`)
+}
+
 export function Bridge() {
   const w = useWallet()
   const sol = useMemo(() => new Connection(SOLANA_RPC, 'confirmed'), [])
-  const [from, setFrom] = useState<PublicKey | null>(null)
+  const ext = solanaWallet()
+  // The app's key wallet signs on Solana itself; inside Telegram and the apps it's the default.
+  const keyWallet = !!w.signWithKey && !!w.publicKey
+  const [useExt, setUseExt] = useState(() => !inApp && !!ext && !keyWallet)
+  const viaKey = keyWallet && !(useExt && ext)
+  const [extFrom, setExtFrom] = useState<PublicKey | null>(null)
+  const from = viaKey ? w.publicKey : extFrom
   const [err, setErr] = useState<string | null>(null)
   const [amt, setAmt] = useState('')
   const [to, setTo] = useState('')
   const [editTo, setEditTo] = useState(false)
   const [tick, setTick] = useState(0)
   const [sent, setSent] = useState<{ sig: string; amount: bigint; to: PublicKey; before: bigint; arrived: boolean } | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
 
-  // Reconnect silently if the wallet already trusts the site.
+  // Reconnect the extension silently if it already trusts the site.
   useEffect(() => {
-    solanaWallet()?.connect({ onlyIfTrusted: true }).then(r => setFrom(new PublicKey(r.publicKey.toString()))).catch(() => {})
-  }, [])
+    if (!viaKey) ext?.connect({ onlyIfTrusted: true }).then(r => setExtFrom(new PublicKey(r.publicKey.toString()))).catch(() => {})
+  }, [viaKey])
 
   const balances = useAsync(async () => {
     if (!from) return null
@@ -48,6 +72,13 @@ export function Bridge() {
     ])
     return { acrux, lamports }
   }, [from?.toBase58(), tick])
+  // Funding a fresh wallet on Solana: check again every few seconds until it shows up.
+  const empty = !!balances.data && (balances.data.acrux === 0n || balances.data.lamports < MIN_SOL)
+  useEffect(() => {
+    if (!empty) return
+    const t = setInterval(() => setTick(x => x + 1), 8000)
+    return () => clearInterval(t)
+  }, [empty])
 
   // Where it arrives: by default the same address on Acrux (the same key works there).
   const recipient = useMemo(() => {
@@ -63,12 +94,11 @@ export function Bridge() {
     const t = setInterval(async () => {
       const now = BigInt(await w.conn.getBalance(sent.to).catch(() => 0))
       // Credited as lamports: 1 base unit (6 decimals) = 1,000 lamports (9 decimals).
-      if (now >= sent.before + sent.amount * 1000n - 10_000n) { setSent({ ...sent, arrived: true }); w.bump() }
+      if (now >= sent.before + sent.amount * 1000n - 10_000n) { setSent({ ...sent, arrived: true }); w.bump(); tap('success') }
     }, 3000)
     return () => clearInterval(t)
   }, [sent, w.conn])
 
-  const wallet = solanaWallet()
   const problems = [
     !raw || raw <= 0n ? 'Enter an amount.' : null,
     balances.data && raw && raw > balances.data.acrux ? 'That is more ACRUX than this wallet holds on Solana.' : null,
@@ -77,22 +107,40 @@ export function Bridge() {
   ].filter(Boolean) as string[]
 
   async function bridge() {
-    setErr(null); setBusy(true)
+    setErr(null); setBusy(viaKey ? 'Sending…' : 'Confirm in your wallet…')
     try {
       const seq = await acruxBridgeNextSequence(sol)
       const tx = new Transaction().add(acruxBridgeDeposit({ depositor: from!, recipient: recipient!, amount: raw!, sequence: seq }))
       tx.feePayer = from!
       tx.recentBlockhash = (await sol.getLatestBlockhash('confirmed')).blockhash
       const before = BigInt(await w.conn.getBalance(recipient!).catch(() => 0))
-      const { signature } = await solanaWallet()!.signAndSendTransaction(tx)
+      let signature: string
+      if (viaKey) {
+        w.signWithKey!(tx)
+        signature = await sol.sendRawTransaction(tx.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed' })
+        setBusy('Confirming on Solana…')
+        await confirmSolana(sol, signature)
+      } else {
+        signature = (await ext!.signAndSendTransaction(tx)).signature
+      }
       setSent({ sig: signature, amount: raw!, to: recipient!, before, arrived: false })
       setAmt('')
       setTimeout(() => setTick(x => x + 1), 4000)
     } catch (e: any) {
       const m = e?.message ?? String(e)
-      setErr(/seeds|ConstraintSeeds|2006/.test(m) ? 'Someone else bridged at the same moment. Try again.' : m)
-    } finally { setBusy(false) }
+      setErr(/seeds|ConstraintSeeds|2006|already in use/.test(m) ? 'Someone else bridged at the same moment. Try again.' : m)
+      tap('error')
+    } finally { setBusy(null) }
   }
+
+  const pickSource = (keyWallet && ext) ? (
+    <div className="seg" style={{ marginBottom: 12 }} role="tablist" aria-label="Bridge from">
+      <button className={viaKey ? 'on' : ''} onClick={() => setUseExt(false)}>This wallet</button>
+      <button className={!viaKey ? 'on' : ''} onClick={() => setUseExt(true)}>Phantom / Backpack</button>
+    </div>
+  ) : null
+
+  const connectExt = () => ext!.connect().then(r => setExtFrom(new PublicKey(r.publicKey.toString())), e => setErr(e.message))
 
   return (
     <div className="narrow">
@@ -102,19 +150,31 @@ export function Bridge() {
       </div></div>
 
       <div className="card">
-        {!wallet ? (
-          <p className="muted" style={{ margin: 0 }}>
-            {inApp
-              ? 'Bridging needs a Solana wallet. Open acruxhub.com in Phantom’s browser or on a computer with Phantom or Backpack.'
-              : 'Bridging needs a Solana wallet such as Phantom or Backpack. Install one, then reload this page.'}
-          </p>
+        {pickSource}
+        {!keyWallet && !ext ? (
+          inApp ? <NeedWallet /> : (
+            <p className="muted" style={{ margin: 0 }}>
+              Bridging needs a wallet: create one with Connect (top right), or install Phantom or Backpack and reload this page.
+            </p>
+          )
         ) : !from ? (
           <>
             <p className="muted" style={{ marginTop: 0 }}>Connect the Solana wallet that holds your ACRUX.</p>
-            <button className="primary" style={{ width: '100%', height: 44 }} onClick={() => wallet.connect().then(r => setFrom(new PublicKey(r.publicKey.toString())), e => setErr(e.message))}>Connect Solana wallet</button>
+            <button className="primary" style={{ width: '100%', height: 44 }} onClick={connectExt}>Connect Solana wallet</button>
           </>
         ) : (
           <>
+            {viaKey && empty && (
+              <div className="notice" style={{ marginTop: 0 }}>
+                <strong>Fund this wallet on Solana first.</strong> Your address is the same on Solana and Acrux:
+                <p className="mono" style={{ wordBreak: 'break-all', margin: '8px 0' }}>{from.toBase58()}</p>
+                <CopyButton text={from.toBase58()} label="Copy address" />
+                <p style={{ margin: '10px 0 0', fontSize: 13 }}>
+                  From Phantom or an exchange, send to it <strong>on Solana</strong>: your ACRUX, plus about <strong>0.01 SOL</strong> for fees.
+                  {' '}Balances below update by themselves. Already hold ACRUX in Phantom? You can also import that wallet's key here instead.
+                </p>
+              </div>
+            )}
             <div className="token-box">
               <div className="token-box-head"><span>From Solana</span>
                 <button className="ghost" style={{ padding: 0 }} onClick={() => balances.data && setAmt(fmt(balances.data.acrux, ACRUX_SOLANA_DECIMALS, ACRUX_SOLANA_DECIMALS).replace(/,/g, ''))}>
@@ -138,10 +198,12 @@ export function Bridge() {
                 : <small className="muted">Arrives at <span className="mono">{short(from, 6)}</span> on Acrux, your same address.</small>}
             </div>
             {problems.length > 0 && amt && <p className="error" style={{ marginBottom: 0 }}>{problems[0]}</p>}
-            <button className="primary" style={{ width: '100%', height: 44, marginTop: 14 }} disabled={busy || problems.length > 0} onClick={bridge}>
-              {busy ? 'Confirm in your wallet…' : `Bridge${raw ? ` ${fmt(raw, ACRUX_SOLANA_DECIMALS, 2)}` : ''} ACRUX`}
+            <button className="primary" style={{ width: '100%', height: 44, marginTop: 14 }} disabled={!!busy || problems.length > 0} onClick={bridge}>
+              {busy ?? `Bridge${raw ? ` ${fmt(raw, ACRUX_SOLANA_DECIMALS, 2)}` : ''} ACRUX`}
             </button>
-            <p className="faint" style={{ fontSize: 12, margin: '10px 0 0' }}>From <span className="mono">{short(from)}</span> · network fee under 0.005 SOL · sent through Acrux’s own bridge</p>
+            <p className="faint" style={{ fontSize: 12, margin: '10px 0 0' }}>
+              From <span className="mono">{short(from)}</span>{viaKey ? ' (this wallet, signing on Solana)' : ''} · SOL {balances.data ? fmt(balances.data.lamports, 9, 4) : '…'} · network fee under 0.005 SOL · sent through Acrux’s own bridge
+            </p>
           </>
         )}
         {err && <p className="error">{err}</p>}
@@ -154,13 +216,14 @@ export function Bridge() {
             <li>Locked on Solana · <a href={`https://solscan.io/tx/${sent.sig}`} target="_blank" rel="noopener noreferrer">view</a></li>
             <li>{sent.arrived ? <>Credited <strong className="num">{fmt(sent.amount, ACRUX_SOLANA_DECIMALS, 2)} ACRUX</strong> to <span className="mono">{short(sent.to)}</span> on Acrux</> : 'Waiting for Acrux to credit it (usually under a minute)'}</li>
           </ol>
-          {sent.arrived && <p style={{ marginBottom: 0 }}><a href="#Launch">Go trade →</a></p>}
+          {sent.arrived && <p style={{ marginBottom: 0 }}><a href="#Swap">Buy something →</a> · <a href="#Wallet">Wallet</a></p>}
         </div>
       )}
 
       <p className="faint" style={{ fontSize: 12 }}>
         Going back from Acrux to Solana isn’t open yet: it needs Solana to certify Acrux’s blocks first. Only bridge what you’re happy to keep on Acrux for now.
-        The bridge is run by Acrux; <a href="https://acrux.computer/bridge" target="_blank" rel="noopener noreferrer">their page</a> shows every transfer.
+        {isTelegram ? ' Your key stays in this phone’s secure storage; the bot never sees it.' : ''}
+        {' '}The bridge is run by Acrux; <a href="https://acrux.computer/bridge" target="_blank" rel="noopener noreferrer">their page</a> shows every transfer.
       </p>
     </div>
   )

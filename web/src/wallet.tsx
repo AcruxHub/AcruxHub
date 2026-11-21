@@ -37,6 +37,9 @@ type Ctx = {
   privateMode: boolean
   setPrivateMode(v: boolean): void
   provider: anchor.AnchorProvider | null
+  /** Signs a transaction for ANOTHER chain (Solana, for the bridge) with the key wallet:
+   * the same key is the same address on Solana and Acrux. Null for injected wallets. */
+  signWithKey: ((tx: Transaction) => Transaction) | null
   /** Signs and sends; returns a signature or Acrux tx id. */
   send(tx: Transaction, extraSigners?: Keypair[]): Promise<string>
   refreshKey: number
@@ -172,6 +175,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     network, setNetwork, conn, publicKey, kind, connectTest, connectInjected, disconnect,
     exportTestKey: () => (test ? bs58.encode(test.secretKey) : null),
     importTestKey,
+    signWithKey: !inj && test ? (tx: Transaction) => { tx.partialSign(test); return tx } : null,
     privateMode: privateMode && !!network.gateway, setPrivateMode,
     provider, send, refreshKey, bump: () => setRefresh(r => r + 1),
   }

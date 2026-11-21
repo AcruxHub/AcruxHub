@@ -155,6 +155,12 @@ function fmtPrice(p: number) {
 const compact = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(2)}K` : n.toFixed(n > 0 && n < 1 ? 4 : 2))
 const bar = (p: number) => '▰'.repeat(Math.round(p * 10)) + '▱'.repeat(10 - Math.round(p * 10))
 
+const BRIDGE_HELP = [
+  'Bridge ACRUX from Solana to Acrux right here, 1:1, usually under a minute.',
+  '',
+  'Your bot wallet has the same address on Solana and Acrux. Send your ACRUX plus about 0.01 SOL to that address on Solana (from Phantom or an exchange), then tap Bridge. Or import your Phantom wallet\'s key and bridge straight from it.',
+].join('\n')
+
 /** One-tap buy sizes, in ACRUX. */
 const BUY_PRESETS = [1_000, 10_000, 100_000]
 
@@ -358,12 +364,12 @@ async function keyword(word: string, privateChat: boolean): Promise<Record<strin
         '2. Open acruxhub.com, Swap (or tap Buy below).',
         `3. Paste the CA <code>${HUB}</code> and swap ACRUX for $HUB.`,
         '',
-        'Or DM me and do it all inside Telegram, with a wallet that stays on your phone.',
+        `Or DM me and do it all inside Telegram, bridge included, with a wallet that stays on your phone: @${BOT}`,
       ].join('\n'),
       reply_markup: { inline_keyboard: [[action('🟢 Buy $HUB', `Swap/${HUB}`, privateChat), action('🌉 Bridge', 'Bridge', privateChat)]] },
     }
   }
-  if (['how to bridge'].includes(w)) return { text: 'Bring ACRUX from Solana to Acrux, 1:1, usually under a minute.', reply_markup: { inline_keyboard: [[action('🌉 Open the bridge', 'Bridge', privateChat)]] } }
+  if (['how to bridge', 'bridge'].includes(w)) return { text: BRIDGE_HELP, reply_markup: { inline_keyboard: [[action('🌉 Open the bridge', 'Bridge', privateChat)]] } }
   if (['docs', 'whitepaper', 'wp'].includes(w)) return { text: `📖 ${LINKS.docs}` }
   if (['github', 'source code'].includes(w)) return { text: `💻 ${LINKS.github}` }
   if (['locked', 'lock', 'is it locked', 'liquidity'].includes(w)) {
@@ -438,7 +444,7 @@ async function onMessage(m: any) {
   const extra = await walletCommands(m, cmd, arg, priv)
   if (extra !== undefined) return extra
   if (cmd === '/launch') return tg('sendMessage', { chat_id: chat, text: 'Launch a coin: fixed supply, no presale, liquidity locked forever at graduation.', reply_markup: { inline_keyboard: [[action('➕ Launch a coin', 'Launch/new', priv)]] } })
-  if (cmd === '/bridge') return tg('sendMessage', { chat_id: chat, text: 'Bring ACRUX over from Solana. On Acrux it\'s your gas.', reply_markup: { inline_keyboard: [[action('🌉 Open the bridge', 'Bridge', priv)]] } })
+  if (cmd === '/bridge') return tg('sendMessage', { chat_id: chat, text: BRIDGE_HELP, reply_markup: { inline_keyboard: [[action('🌉 Open the bridge', 'Bridge', priv)]] } })
   if (cmd === '/swap') return tg('sendMessage', { chat_id: chat, text: 'Swap at the best price across AcruxHub and Raydium pools.', reply_markup: { inline_keyboard: [[action('🔁 Swap', arg ? `Swap/${arg}` : 'Swap', priv)]] } })
   if (cmd === '/coins') {
     const all = await coins()
