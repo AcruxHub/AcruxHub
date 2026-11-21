@@ -156,7 +156,8 @@ function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNo
   const progress = (l: LaunchRow) => curveProgress(stateOf(l.account))
   const list = useMemo(() => {
     const xs = [...filtered]
-    if (tab === 'top') return xs.filter(l => !l.account.graduated).sort((a, b) => progress(b) - progress(a))
+    // Top: coins on the curve by progress, then graduated coins, so the board is never empty.
+    if (tab === 'top') return [...xs.filter(l => !l.account.graduated).sort((a, b) => progress(b) - progress(a)), ...xs.filter(l => l.account.graduated)]
     if (tab === 'new') return xs
     if (tab === 'almost') return xs.filter(l => !l.account.graduated && progress(l) >= 0.5).sort((a, b) => progress(b) - progress(a))
     if (tab === 'test') return tests.filter(l => !needle || l.account.symbol.toLowerCase().includes(needle) || l.account.name.toLowerCase().includes(needle))
