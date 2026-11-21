@@ -13,7 +13,7 @@ import { fmt, parseAmount, short, LAUNCHES_PAUSED, KNOWN_TOKENS } from '../net.t
 import { Action, CopyButton, Price } from '../ui.tsx'
 import { useMeta, safeUrl, uploadCoin, readImage, type CoinMeta } from '../meta.ts'
 import { launchpadUpgraded, launchpadFor } from '../launchpad.ts'
-import { loadTrades, loadHolders, holdersFromTrades, type Holder, ago, compact, fmtPrice, openingPrice, type Trade } from '../history.ts'
+import { loadTrades, loadPoolTrades, loadHolders, holdersFromTrades, type Holder, ago, compact, fmtPrice, openingPrice, type Trade } from '../history.ts'
 import { PriceChart } from '../chart.tsx'
 import { wrapFor, spendable } from '../wrap.ts'
 import { useLocked, lockDate } from './Locks.tsx'
@@ -30,7 +30,7 @@ function viewFromHash(): View {
   if (!rest) return { kind: 'board', q: '' }
   if (rest === 'new') return { kind: 'create' }
   if (rest.startsWith('q:')) return { kind: 'board', q: rest.slice(2) }
-  return { kind: 'coin', key: rest }
+  return { kind: 'coin', key: rest.split('/')[0] } // /buy, /sell, /<amount> are trade presets
 }
 
 /** Price per whole coin in whole quote tokens. */
@@ -302,7 +302,14 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
   const s = stateOf(a)
   const meta = useMeta(a.uri)
   const program = useMemo(() => launchpadFor(readProvider(w.conn), upgraded), [w.conn, upgraded])
-  const trades = useAsync(() => loadTrades(w.conn, program, l.publicKey), [w.conn, program, l.publicKey.toBase58(), w.refreshKey])
+  // Curve trades, then (once graduated) swaps in its pool, as one history.
+  const trades = useAsync(async () => {
+    const [curve, pool] = await Promise.all([
+      loadTrades(w.conn, program, l.publicKey),
+      a.graduated ? loadPoolTrades(w.conn, a.pool, a.mint).catch(() => []) : Promise.resolve([]),
+    ])
+    return [...curve, ...pool].sort((x, y) => x.time - y.time)
+  }, [w.conn, program, l.publicKey.toBase58(), a.graduated, w.refreshKey])
   const curveBal = useAsync(async () => BigInt((await w.conn.getTokenAccountBalance(a.curveTokens)).value.amount), [w.conn, a.curveTokens.toBase58(), w.refreshKey])
   const [tab, setTab] = useState<'trades' | 'holders' | 'about'>('trades')
   const mk = useMarket(l, qd, totalSupply)
@@ -352,7 +359,7 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
           </div>
 
           <div className="card chart-card" style={{ marginBottom: 16 }}>
-            <div className="chart-head"><small>Price in {quoteSym} per {a.symbol}</small><small>{a.graduated ? 'Curve history (now trading in its pool)' : 'Bonding curve'}</small></div>
+            <div className="chart-head"><small>Price in {quoteSym} per {a.symbol}</small><small>{a.graduated ? 'Bonding curve, then its pool' : 'Bonding curve'}</small></div>
             {trades.loading && !trades.data ? <div className="chart-empty">Loading trades…</div>
               : pts.length < 1 ? <div className="chart-empty">No trades yet: the first buy sets the chart off.</div>
               : <PriceChart points={pts} up={change >= 0} />}
@@ -461,8 +468,10 @@ function Holders({ holders, live, curve, totalSupply, graduated }: { holders: Ho
 function TradePanel({ l, s, quoteMint, quoteSym, qd, paused, upgraded }: { l: LaunchRow; s: CurveState; paused: boolean; upgraded: boolean } & Quote) {
   const w = useWallet()
   const a = l.account
-  const [side, setSide] = useState<'buy' | 'sell'>('buy')
-  const [amt, setAmt] = useState('')
+  // Links from the bot: #Launch/<CA>/sell, #Launch/<CA>/buy/<amount>.
+  const linkParts = location.hash.split('/').slice(2)
+  const [side, setSide] = useState<'buy' | 'sell'>(linkParts.includes('sell') ? 'sell' : 'buy')
+  const [amt, setAmt] = useState(linkParts.find(p => /^\d+(\.\d+)?$/.test(p)) ?? '')
   const [slip, setSlip] = useState(1)
   const raw = parseAmount(amt, side === 'buy' ? qd : TOKEN_DECIMALS)
   // Platform-token holders pay a smaller trade fee (upgraded launchpad only).

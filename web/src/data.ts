@@ -159,3 +159,37 @@ export function marketQuote(m: Market, amountIn: bigint, aToB: boolean): bigint 
   if (m.kind === 'raydium') return cpmmSwapOut(amountIn, ri, ro, m.raydium!.config, m.raydium!.pool, aToB)
   return swapOut(amountIn, ri, ro, m.amm!.feeBps)
 }
+
+// ------------------------------------------------------------------ prices in ACRUX
+
+/** ACRUX per whole token, for every token we can price: coins still on their curve
+ * (priced by the curve) and anything with a pool against wrapped ACRUX (priced by its
+ * deepest pool, which wins over the curve once a coin graduates). */
+export async function acruxPrices(conn: Connection, wacrux: string): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const lp = launchpadProgram(readProvider(conn))
+  const [launches, markets] = await Promise.all([
+    allAccounts<any>(lp, 'Launch').catch(() => [] as any[]),
+    loadMarkets(conn).catch(() => [] as Market[]),
+  ])
+  const onCurve = launches.filter(l => !l.account.graduated)
+  if (onCurve.length) {
+    const quotes = await conn.getMultipleParsedAccounts(onCurve.map(l => l.account.curveQuote as PublicKey)).catch(() => null)
+    onCurve.forEach((l, i) => {
+      const info = (quotes?.value[i]?.data as any)?.parsed?.info
+      if (info?.mint !== wacrux) return
+      const vq = Number(l.account.virtualQuote.toString()), vt = Number(l.account.virtualTokens.toString())
+      if (vt > 0) out.set(l.account.mint.toBase58(), (vq / vt) * 10 ** (6 - 9))
+    })
+  }
+  const depth = new Map<string, bigint>()
+  for (const m of markets) {
+    const aW = m.mintA.toBase58() === wacrux, bW = m.mintB.toBase58() === wacrux
+    if (aW === bW) continue
+    const [tok, tokR, tokD, wR] = aW ? [m.mintB.toBase58(), m.reserveB, m.decimalsB, m.reserveA] : [m.mintA.toBase58(), m.reserveA, m.decimalsA, m.reserveB]
+    if (wR <= (depth.get(tok) ?? 0n)) continue
+    depth.set(tok, wR)
+    out.set(tok, (Number(wR) / 1e9) / (Number(tokR) / 10 ** tokD))
+  }
+  return out
+}

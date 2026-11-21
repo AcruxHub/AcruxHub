@@ -125,8 +125,9 @@ function externalLinks(open: (url: string) => void) {
   }, true)
 }
 
-/** Pages the bot may open, as Route or Route_<address> (Telegram's startapp alphabet). */
-const START = /^(Launch|Swap|Pools|Bridge|Explorer|Portfolio|Docs)(_[1-9A-HJ-NP-Za-km-z]{32,44}|_new)?$/
+/** Pages the bot may open, as Route or Route_part_part (Telegram's startapp alphabet has
+ * no slash): an address, new/send/receive/buy/sell, or a whole-number amount. */
+const START = /^(Launch|Swap|Pools|Bridge|Explorer|Portfolio|Docs|Wallet|Locks)(_([1-9A-HJ-NP-Za-km-z]{32,44}|new|send|receive|buy|sell|\d{1,12}))*$/
 
 async function initTelegram() {
   document.documentElement.classList.add('telegram')
@@ -140,8 +141,9 @@ async function initTelegram() {
     document.head.appendChild(s)
   })
   const tg = (window as any).Telegram?.WebApp
-  const start: string = tg?.initDataUnsafe?.start_param ?? ''
-  history.replaceState(null, '', `#${START.test(start) ? start.replace('_', '/') : 'Launch'}`)
+  // t.me links pass the page as start_param; the bot's in-chat buttons pass it as ?r=.
+  const start: string = tg?.initDataUnsafe?.start_param || new URLSearchParams(location.search).get('r') || ''
+  history.replaceState(null, '', `#${START.test(start) ? start.replace(/_/g, '/') : 'Launch'}`)
   if (!tg) return
   tg.ready()
   tg.expand()
@@ -188,4 +190,17 @@ export async function tap(kind: 'light' | 'success' | 'error' = 'light') {
   const { Haptics, ImpactStyle, NotificationType } = await import('@capacitor/haptics')
   if (kind === 'light') await Haptics.impact({ style: ImpactStyle.Light }).catch(() => {})
   else await Haptics.notification({ type: kind === 'success' ? NotificationType.Success : NotificationType.Error }).catch(() => {})
+}
+
+/** Inside Telegram: tell the bot this user's wallet address (public, never the key),
+ * so /wallet can show their balances in chat. Telegram signs the user's identity
+ * (initData), and the server checks that signature before saving anything. */
+let linked = ''
+export async function linkTelegramWallet(address: string) {
+  const initData: string = (window as any).Telegram?.WebApp?.initData ?? ''
+  if (!initData || linked === address) return
+  linked = address
+  await fetch(`${API_BASE || location.origin}/api/telegram?op=link`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ initData, address }),
+  }).catch(() => { linked = '' })
 }

@@ -154,3 +154,48 @@ export async function loadHolders(conn: Connection, mint: PublicKey, curveTokens
   }
   return [...by.values()].sort((a, b) => (a.amount === b.amount ? 0 : a.amount > b.amount ? -1 : 1))
 }
+
+/** Swaps in a graduated coin's Raydium CPMM pool, as trades. Read from each swap's
+ * token balance changes on the pool's two vaults; the price after a swap is the
+ * vaults' ratio (quote raw per token raw, the same unit as curve trades). Pool
+ * creation and liquidity changes (both vaults moving the same way) are skipped. */
+export async function loadPoolTrades(conn: Connection, pool: PublicKey, mint: PublicKey, limit = 300): Promise<Trade[]> {
+  const info = await conn.getAccountInfo(pool)
+  if (!info || info.data.length < 200) return []
+  const d = info.data
+  const vA = new PublicKey(d.subarray(72, 104)).toBase58(), vB = new PublicKey(d.subarray(104, 136)).toBase58()
+  const tokenIsA = new PublicKey(d.subarray(168, 200)).equals(mint)
+  const [tokV, quoteV] = tokenIsA ? [vA, vB] : [vB, vA]
+  const sigs = (await conn.getSignaturesForAddress(pool, { limit })).filter(s => !s.err)
+  const out: Trade[] = []
+  for (let i = 0; i < sigs.length; i += 10) {
+    const chunk = sigs.slice(i, i + 10)
+    const txs = await Promise.all(chunk.map(s => conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' }).catch(() => null)))
+    txs.forEach((tx, j) => {
+      if (!tx?.meta) return
+      const keys = tx.transaction.message.getAccountKeys({ accountKeysFromLookups: tx.meta.loadedAddresses })
+      const bal = (list: typeof tx.meta.preTokenBalances, v: string) => {
+        const b = (list ?? []).find(x => keys.get(x.accountIndex)?.toBase58() === v)
+        return b ? BigInt(b.uiTokenAmount.amount) : null
+      }
+      const t0 = bal(tx.meta.preTokenBalances, tokV), t1 = bal(tx.meta.postTokenBalances, tokV)
+      const q0 = bal(tx.meta.preTokenBalances, quoteV), q1 = bal(tx.meta.postTokenBalances, quoteV)
+      if (t0 == null || t1 == null || q0 == null || q1 == null || t0 === 0n || t1 === 0n) return
+      const dt = t1 - t0, dq = q1 - q0
+      if (dt === 0n || dq === 0n || (dt > 0n) === (dq > 0n)) return // not a swap
+      const vq = Number(q1), vt = Number(t1)
+      out.push({
+        sig: chunk[j].signature,
+        time: tx.blockTime ?? chunk[j].blockTime ?? 0,
+        buy: dt < 0n,
+        user: keys.get(0)!.toBase58(),
+        quote: dq < 0n ? -dq : dq,
+        tokens: dt < 0n ? -dt : dt,
+        price: vq / vt,
+        vq,
+        vt,
+      })
+    })
+  }
+  return out.sort((a, b) => a.time - b.time)
+}

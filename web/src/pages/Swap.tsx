@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { PublicKey, Transaction } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { ammProgram, minOut, launchAddress, platformFee, routedSwapInstructions, PLATFORM_FEE_BPS, holderStatus, discountedFeeBps, launchpadProgram } from '@acruxhub/sdk'
@@ -33,19 +33,30 @@ export function Swap() {
 
   // Paste a contract address (CA): find its pools and set up a buy of that token.
   const [ca, setCa] = useState(() => decodeURIComponent(location.hash.split('/')[1] ?? ''))
+  // Links from the bot and the wallet: #Swap/<CA>/sell, #Swap/<CA>/<amount>, #Swap/<CA>/sell/<amount>.
+  const preset = useRef<{ sell: boolean; amount: string } | null>((() => {
+    const parts = location.hash.split('/').slice(2)
+    return { sell: parts.includes('sell'), amount: parts.find(p => /^\d+(\.\d+)?$/.test(p)) ?? '' }
+  })())
+  // The CA the pair was last picked for: pools refreshing (after a trade) must not reset it.
+  const pickedFor = useRef('')
   const caKey = useMemo(() => { try { return ca.trim() ? new PublicKey(ca.trim()) : null } catch { return null } }, [ca])
   const caPairs = useMemo(
     () => (caKey ? pairs.filter(p => p.mintA.equals(caKey) || p.mintB.equals(caKey)) : []),
     [caKey, pairs],
   )
   useEffect(() => {
-    if (!caKey || !caPairs.length) return
+    if (!caKey || !caPairs.length || pickedFor.current === caKey.toBase58()) return
+    pickedFor.current = caKey.toBase58()
     // The pair holding the most of the pasted token, across all its pools.
     const depth = (p: (typeof caPairs)[number]) => p.markets.reduce((s, m) => s + (m.mintA.equals(caKey) ? m.reserveA : m.reserveB), 0n)
     const best = [...caPairs].sort((x, y) => (depth(x) === depth(y) ? 0 : depth(x) > depth(y) ? -1 : 1))[0]
     setPairSel(best.key)
-    setAToB(!best.mintA.equals(caKey)) // receive the pasted token
-    setAmount('')
+    // Buy (receive the pasted token) unless the link asked to sell it.
+    const sell = preset.current?.sell ?? false
+    setAToB(sell ? best.mintA.equals(caKey) : !best.mintA.equals(caKey))
+    setAmount(preset.current?.amount ?? '')
+    preset.current = null
   }, [caKey, caPairs])
   const onCurve = useAsync(async () => {
     if (!caKey || caPairs.length) return null

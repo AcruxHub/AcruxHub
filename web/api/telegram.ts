@@ -12,6 +12,7 @@
 // header, so only Telegram can call this), TELEGRAM_BOT_USERNAME, TELEGRAM_GROUP_ID.
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { put, head } from '@vercel/blob'
 
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? ''
 const SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? ''
@@ -27,6 +28,10 @@ const DEMO = new Set(['28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td', '713QqmE1x
 const HIDDEN = new Set(['99ysnj1KnpG6mpEZa1kjN8JCkjDZifpjWL6r4gUPKYjN'])
 const AXB = '28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td'
 const LAUNCHPAD = '3qCdE6gNWinKpPX71JZk8DGe2AYsYaVg6v8WB7N3SKrd'
+const TOKEN_PROGRAM = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+// AcruxHub's own coin, and the official links the group's keyword replies give out.
+const HUB = 'AuVCwgJQRQP1EA655JLDP86uD7r6qEcQZRti4Htp5Uvp'
+const LINKS = { x: 'https://x.com/AcruxHub', site: SITE, tg: 'https://t.me/AcruxHubPortal', github: 'https://github.com/AcruxHub/AcruxHub', docs: `${SITE}/#Docs` }
 // Launch account discriminator (sdk/src/idl/acruxhub_launchpad.json).
 const LAUNCH_DISC = Buffer.from([144, 51, 51, 163, 206, 85, 213, 38])
 
@@ -48,7 +53,7 @@ const esc = (s: string) => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;'
  */
 function action(text: string, route: string, privateChat: boolean) {
   return privateChat
-    ? { text, web_app: { url: `${SITE}/#${route}` } }
+    ? { text, web_app: { url: `${SITE}/?r=${encodeURIComponent(route.replace(/\//g, '_'))}` } }
     : { text, url: `https://t.me/${BOT}?startapp=${encodeURIComponent(route.replace(/\//g, '_'))}` }
 }
 
@@ -147,8 +152,11 @@ function fmtPrice(p: number) {
   const sub = '₀₁₂₃₄₅₆₇₈₉'
   return `0.0${String(zeros).split('').map(d => sub[+d]).join('')}${Math.round(p * 10 ** (zeros + 4)).toString().replace(/0+$/, '')}`
 }
-const compact = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(2)}K` : n.toFixed(2))
+const compact = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(2)}K` : n.toFixed(n > 0 && n < 1 ? 4 : 2))
 const bar = (p: number) => '▰'.repeat(Math.round(p * 10)) + '▱'.repeat(10 - Math.round(p * 10))
+
+/** One-tap buy sizes, in ACRUX. */
+const BUY_PRESETS = [1_000, 10_000, 100_000]
 
 function coinCard(c: Coin, privateChat: boolean) {
   const status = c.graduated ? '🎓 Graduated, trading on its pool' : c.complete ? '✅ Curve full, ready to graduate' : `${bar(c.progress)} ${(c.progress * 100).toFixed(1)}%`
@@ -160,15 +168,208 @@ function coinCard(c: Coin, privateChat: boolean) {
     `MC     ${compact(c.mcap)} ${c.quote}`,
     c.graduated ? status : `Curve  ${status}\nRaised ${c.raised.toFixed(2)} / ${c.target} ${c.quote}`,
   ].join('\n')
-  const buttons = c.graduated
-    ? [[action('🔁 Swap', `Swap/${c.mint}`, privateChat), action('📈 Chart', `Launch/${c.mint}`, privateChat)]]
-    : [[action('🟢 Buy', `Launch/${c.mint}`, privateChat), action('🔴 Sell', `Launch/${c.mint}`, privateChat)]]
+  // Graduated coins trade on Swap (best pool); coins on the curve trade on their page.
+  const trade = (preset: string) => (c.graduated ? `Swap/${c.mint}/${preset}` : `Launch/${c.mint}/${preset}`)
+  const buttons = [
+    BUY_PRESETS.map(n => action(`🟢 Buy ${compact(n).replace('.00', '')}`, trade(`buy/${n}`), privateChat)),
+    [action('🔴 Sell', trade('sell'), privateChat), action('📈 Chart', `Launch/${c.mint}`, privateChat), action('💼 Wallet', 'Wallet', privateChat)],
+  ]
   return { text, reply_markup: { inline_keyboard: buttons } }
 }
 
 function findCoin(all: Coin[], q: string) {
   const s = q.trim().replace(/^\$/, '')
   return all.find(c => c.mint === s) ?? all.find(c => c.symbol.toLowerCase() === s.toLowerCase())
+}
+
+// ---------------------------------------------------------------- wallets
+// The Mini App tells us each user's wallet ADDRESS (public; never the key), signed by
+// Telegram (initData), so /wallet can show their balances in chat. Stored in Blob under
+// an unguessable name derived from the user id with our secret.
+const walletPath = (uid: number) => `tg-wallets/${createHmac('sha256', SECRET).update(`wallet:${uid}`).digest('hex').slice(0, 32)}.json`
+const isAddress = (s: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(s)
+
+/** Telegram's Mini App initData check: returns the signed user id, or null. */
+function verifyInitData(initData: string): number | null {
+  const p = new URLSearchParams(initData)
+  const hash = p.get('hash')
+  if (!hash) return null
+  p.delete('hash')
+  const check = [...p.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n')
+  const key = createHmac('sha256', 'WebAppData').update(TOKEN).digest()
+  const want = createHmac('sha256', key).update(check).digest('hex')
+  if (want.length !== hash.length || !timingSafeEqual(Buffer.from(want), Buffer.from(hash))) return null
+  if (Date.now() / 1000 - Number(p.get('auth_date') ?? 0) > 86_400) return null
+  try { return Number(JSON.parse(p.get('user') ?? '{}').id) || null } catch { return null }
+}
+
+async function linkedWallet(uid: number): Promise<string | null> {
+  try {
+    const meta = await head(walletPath(uid))
+    const j: any = await (await fetch(`${meta.url}?t=${Date.now()}`, { cache: 'no-store' })).json()
+    return isAddress(j?.address ?? '') ? j.address : null
+  } catch { return null }
+}
+
+async function link(body: any) {
+  const uid = verifyInitData(String(body?.initData ?? ''))
+  const address = String(body?.address ?? '')
+  if (!uid || !isAddress(address)) return { ok: false }
+  if ((await linkedWallet(uid)) === address) return { ok: true }
+  await put(walletPath(uid), JSON.stringify({ address }), { access: 'public', addRandomSuffix: false, allowOverwrite: true, contentType: 'application/json', cacheControlMaxAge: 60 })
+  await tg('sendMessage', { chat_id: uid, parse_mode: 'HTML', text: `✅ Wallet linked: <code>${address}</code>\n\nSend /wallet any time to see your balances here. Only the address is saved: your key stays on your phone.` })
+  return { ok: true }
+}
+
+async function linkEndpoint(req: VercelRequest, res: VercelResponse) {
+  const origin = String(req.headers.origin ?? '')
+  if (['capacitor://localhost', 'https://localhost'].includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Access-Control-Allow-Headers', 'content-type')
+  }
+  if (req.method === 'OPTIONS') return res.status(204).end()
+  if (req.method !== 'POST') return res.status(405).end()
+  const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body
+  return res.status(200).json(await link(body).catch(e => { console.error('link failed', e); return { ok: false } }))
+}
+
+type Bal = { mint: string; label: string; amount: number; value: number | null }
+async function balances(address: string): Promise<{ native: number; tokens: Bal[]; total: number }> {
+  const [lamports, accts, all] = await Promise.all([
+    rpc<any>('getBalance', [address]).then(r => Number(r?.value ?? r)),
+    rpc<any>('getTokenAccountsByOwner', [address, { programId: TOKEN_PROGRAM }, { encoding: 'jsonParsed' }]).then(r => (r?.value ?? []) as any[]).catch(() => [] as any[]),
+    coins().catch(() => [] as Coin[]),
+  ])
+  const byMint = new Map(all.map(c => [c.mint, c]))
+  const sums = new Map<string, number>()
+  for (const a of accts) {
+    const i = a.account.data.parsed.info
+    sums.set(i.mint, (sums.get(i.mint) ?? 0) + Number(i.tokenAmount.uiAmountString ?? i.tokenAmount.uiAmount ?? 0))
+  }
+  const tokens: Bal[] = [...sums.entries()].filter(([, v]) => v > 0).map(([mint, amount]) => {
+    if (mint === WRAPPED_ACRUX) return { mint, label: 'Wrapped ACRUX', amount, value: amount }
+    const c = byMint.get(mint)
+    return { mint, label: c ? '$' + c.symbol : `${mint.slice(0, 4)}…${mint.slice(-4)}`, amount, value: c && c.quote === 'ACRUX' ? amount * c.price : null }
+  }).sort((a, b) => (b.value ?? -1) - (a.value ?? -1))
+  const native = lamports / 1e9
+  return { native, tokens, total: native + tokens.reduce((s, t) => s + (t.value ?? 0), 0) }
+}
+
+async function walletCard(address: string, mine: boolean, privateChat: boolean) {
+  const b = await balances(address)
+  const n = (v: number) => (v >= 1e6 ? compact(v) : v.toLocaleString('en-US', { maximumFractionDigits: v < 1 ? 6 : 2 }))
+  const lines = [
+    `💼 <b>${mine ? 'Your wallet' : 'Wallet'}</b>`,
+    `<code>${address}</code>`,
+    '',
+    `<b>≈ ${n(b.total)} ACRUX</b> total`,
+    '',
+    `ACRUX  ${n(b.native)}`,
+    ...b.tokens.slice(0, 15).map(t => `${esc(t.label)}  ${n(t.amount)}${t.value != null && t.mint !== WRAPPED_ACRUX ? `  (≈ ${n(t.value)} ACRUX)` : ''}`),
+    ...(b.tokens.length > 15 ? [`…and ${b.tokens.length - 15} more`] : []),
+  ]
+  const kb = mine && privateChat
+    ? [
+        [action('↑ Send', 'Wallet/send', true), action('↓ Receive', 'Wallet/receive', true), action('⇄ Swap', 'Swap', true)],
+        [{ text: '🔄 Refresh', callback_data: 'w:refresh' }, action('💼 Open wallet', 'Wallet', true)],
+      ]
+    : [[{ text: '🔎 View on AcruxHub', url: `${SITE}/#Explorer/${address}` }]]
+  return { text: lines.join('\n'), parse_mode: 'HTML', reply_markup: { inline_keyboard: kb } }
+}
+
+/** /wallet, /balance, /send, /receive and the /ca-style keyword commands. undefined = not one of these. */
+async function walletCommands(m: any, cmd: string, arg: string, priv: boolean) {
+  const chat = m.chat.id
+  if (cmd === '/wallet' || cmd === '/balance' || cmd === '/bal') {
+    if (arg && isAddress(arg)) return tg('sendMessage', { chat_id: chat, reply_to_message_id: m.message_id, ...(await walletCard(arg, false, priv)) })
+    // Your own wallet only in a DM: balances don't belong in a group chat.
+    if (!priv) {
+      return tg('sendMessage', {
+        chat_id: chat, reply_to_message_id: m.message_id,
+        text: 'DM me /wallet to see your own balances privately, or send /balance <address> here.',
+        reply_markup: { inline_keyboard: [[{ text: '💼 Open in DM', url: `https://t.me/${BOT}?start=wallet` }]] },
+      })
+    }
+    const mine = await linkedWallet(m.from.id)
+    if (!mine) {
+      return tg('sendMessage', {
+        chat_id: chat,
+        text: 'Open your wallet once and I\'ll remember its address (only the address: your key never leaves your phone). After that, /wallet shows your balances right here.',
+        reply_markup: { inline_keyboard: [[action('💼 Open wallet', 'Wallet', true)]] },
+      })
+    }
+    return tg('sendMessage', { chat_id: chat, ...(await walletCard(mine, true, true)) })
+  }
+  if (cmd === '/send') return tg('sendMessage', { chat_id: chat, text: 'Send ACRUX or any token from your wallet.', reply_markup: { inline_keyboard: [[action('↑ Send', 'Wallet/send', priv)]] } })
+  if (cmd === '/receive' || cmd === '/deposit') {
+    const mine = priv ? await linkedWallet(m.from.id) : null
+    return tg('sendMessage', {
+      chat_id: chat, parse_mode: 'HTML',
+      text: mine ? `Your Acrux address (the same for every token):\n<code>${mine}</code>\n\nComing from Solana? Use /bridge.` : 'Open your wallet to see your address.',
+      reply_markup: { inline_keyboard: [[action('↓ Receive', 'Wallet/receive', priv)]] },
+    })
+  }
+  if (cmd.startsWith('/') && !['/start', '/coin', '/coins', '/price', '/swap', '/launch', '/bridge', '/help', '/chatid'].includes(cmd)) {
+    const k = await keyword(cmd.slice(1), priv)
+    if (k) return tg('sendMessage', { chat_id: chat, reply_to_message_id: m.message_id, ...k })
+  }
+  return undefined
+}
+
+async function refreshWallet(q: any) {
+  const mine = await linkedWallet(q.from.id)
+  await tg('answerCallbackQuery', { callback_query_id: q.id, text: mine ? 'Updated' : 'Open your wallet first' })
+  if (mine) return tg('editMessageText', { chat_id: q.message.chat.id, message_id: q.message.message_id, ...(await walletCard(mine, true, true)) })
+}
+
+// ---------------------------------------------------------------- keyword replies
+// Typing one of these on its own (as in most coin groups) gets the official answer.
+async function keyword(word: string, privateChat: boolean): Promise<Record<string, unknown> | null> {
+  const w = word.toLowerCase().replace(/^[/!$]/, '').replace(/@\w+$/, '').replace(/[?!.\s]+$/, '').trim()
+  const hub = async () => (await coins()).find(x => x.mint === HUB)
+  if (['ca', 'contract', 'contract address', 'hub ca', 'token address'].includes(w)) {
+    const c = await hub()
+    const head = `<b>$HUB contract address</b> (tap to copy)\n<code>${HUB}</code>`
+    if (!c) return { parse_mode: 'HTML', text: head }
+    const card = coinCard(c, privateChat)
+    return { parse_mode: 'HTML', reply_markup: card.reply_markup, text: `${head}\n\n${card.text}` }
+  }
+  if (['x', 'twitter', 'twiter', 'x account'].includes(w)) return { text: `𝕏 Follow AcruxHub: ${LINKS.x}` }
+  if (['web', 'website', 'site', 'app', 'dapp', 'url'].includes(w)) {
+    return { text: `🌐 ${LINKS.site}\nLaunch, trade, lock and bridge on Acrux.`, reply_markup: { inline_keyboard: [[action('🚀 Open AcruxHub', 'Launch', privateChat)]] } }
+  }
+  if (['tg', 'telegram', 'portal'].includes(w)) return { text: `💬 ${LINKS.tg}` }
+  if (['links', 'socials', 'social', 'official'].includes(w)) {
+    return {
+      parse_mode: 'HTML', disable_web_page_preview: true,
+      text: ['<b>AcruxHub official links</b>', '', `🌐 ${LINKS.site}`, `𝕏 ${LINKS.x}`, `💬 ${LINKS.tg}`, `📖 ${LINKS.docs}`, '', `$HUB CA: <code>${HUB}</code>`].join('\n'),
+    }
+  }
+  if (['chart', 'price', 'mc', 'mcap', 'market cap'].includes(w)) {
+    const c = await hub()
+    return c ? { parse_mode: 'HTML', ...coinCard(c, privateChat) } : null
+  }
+  if (['how to buy', 'how do i buy', 'htb'].includes(w)) {
+    return {
+      parse_mode: 'HTML',
+      text: [
+        '<b>How to buy $HUB</b>',
+        '1. Get ACRUX on Acrux: bridge it from Solana (acruxhub.com, Bridge).',
+        '2. Open acruxhub.com, Swap (or tap Buy below).',
+        `3. Paste the CA <code>${HUB}</code> and swap ACRUX for $HUB.`,
+        '',
+        'Or DM me and do it all inside Telegram, with a wallet that stays on your phone.',
+      ].join('\n'),
+      reply_markup: { inline_keyboard: [[action('🟢 Buy $HUB', `Swap/${HUB}`, privateChat), action('🌉 Bridge', 'Bridge', privateChat)]] },
+    }
+  }
+  if (['how to bridge'].includes(w)) return { text: 'Bring ACRUX from Solana to Acrux, 1:1, usually under a minute.', reply_markup: { inline_keyboard: [[action('🌉 Open the bridge', 'Bridge', privateChat)]] } }
+  if (['docs', 'whitepaper', 'wp'].includes(w)) return { text: `📖 ${LINKS.docs}` }
+  if (['github', 'source code'].includes(w)) return { text: `💻 ${LINKS.github}` }
+  if (['locked', 'lock', 'is it locked', 'liquidity'].includes(w)) {
+    return { text: `🔒 The dev's $HUB is locked on chain until Nov 2028, and graduation burned all the LP. Check it yourself: ${SITE}/#Locks/${HUB}` }
+  }
+  return null
 }
 
 // ---------------------------------------------------------------- portal check
@@ -203,11 +404,14 @@ const HELP = [
   '<b>AcruxHub</b>: launch and trade coins on Acrux.',
   '',
   'Paste any coin address (CA) and I\'ll show it.',
+  '/wallet  your balances (send, receive, swap)',
+  '/balance &lt;address&gt;  any wallet\'s balances',
   '/coins  top coins on the launchpad',
   '/coin &lt;CA or ticker&gt;  one coin',
   '/launch  launch a coin',
   '/swap  swap any token',
   '/bridge  bring ACRUX over from Solana',
+  '/links  official links and the $HUB CA',
   '',
   'Trades open AcruxHub inside Telegram. Your wallet key stays in your phone\'s secure storage: the bot never sees it.',
 ].join('\n')
@@ -222,14 +426,17 @@ async function onMessage(m: any) {
 
   if (cmd === '/start') {
     if (arg === 'verify' && priv) return tg('sendMessage', { chat_id: chat, ...challenge(m.from.id) })
+    if (arg === 'wallet' && priv) return walletCommands(m, '/wallet', '', true)
     return tg('sendMessage', {
       chat_id: chat, text: HELP, parse_mode: 'HTML',
-      reply_markup: { inline_keyboard: [[action('🚀 Open AcruxHub', 'Launch', priv)], [action('➕ Launch a coin', 'Launch/new', priv), action('🌉 Bridge', 'Bridge', priv)]] },
+      reply_markup: { inline_keyboard: [[action('💼 My wallet', 'Wallet', priv), action('🚀 Coins', 'Launch', priv)], [action('⇄ Swap', 'Swap', priv), action('➕ Launch a coin', 'Launch/new', priv)], [action('🌉 Bridge', 'Bridge', priv), action('🔒 Locks', 'Locks', priv)]] },
     })
   }
   // In a group or channel the bot was added to, /chatid tells the owner its id (for TELEGRAM_GROUP_ID).
   if (cmd === '/chatid' && !priv) return tg('sendMessage', { chat_id: chat, text: `Chat id: ${chat}` })
   if (cmd === '/help') return tg('sendMessage', { chat_id: chat, text: HELP, parse_mode: 'HTML' })
+  const extra = await walletCommands(m, cmd, arg, priv)
+  if (extra !== undefined) return extra
   if (cmd === '/launch') return tg('sendMessage', { chat_id: chat, text: 'Launch a coin: fixed supply, no presale, liquidity locked forever at graduation.', reply_markup: { inline_keyboard: [[action('➕ Launch a coin', 'Launch/new', priv)]] } })
   if (cmd === '/bridge') return tg('sendMessage', { chat_id: chat, text: 'Bring ACRUX over from Solana. On Acrux it\'s your gas.', reply_markup: { inline_keyboard: [[action('🌉 Open the bridge', 'Bridge', priv)]] } })
   if (cmd === '/swap') return tg('sendMessage', { chat_id: chat, text: 'Swap at the best price across AcruxHub and Raydium pools.', reply_markup: { inline_keyboard: [[action('🔁 Swap', arg ? `Swap/${arg}` : 'Swap', priv)]] } })
@@ -250,11 +457,17 @@ async function onMessage(m: any) {
     if (!c) return tg('sendMessage', { chat_id: chat, text: arg ? 'No coin found for that.' : 'Send /coin with a ticker or CA.' })
     return tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', ...coinCard(c, priv) })
   }
-  // A pasted CA, anywhere: show the coin if it's one of ours.
+  // A keyword on its own ("ca", "x", "web", "chart"...): the official answer.
+  if (text && text.length <= 24 && !text.startsWith('/')) {
+    const k = await keyword(text, priv)
+    if (k) return tg('sendMessage', { chat_id: chat, reply_to_message_id: m.message_id, ...k })
+  }
+  // A pasted address: a coin card if it's one of ours, else (in a DM) that wallet's balances.
   const ca = text.match(/\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/)?.[0]
   if (ca) {
     const c = (await coins()).find(x => x.mint === ca)
     if (c) return tg('sendMessage', { chat_id: chat, parse_mode: 'HTML', reply_to_message_id: m.message_id, ...coinCard(c, priv) })
+    if (priv && text.trim() === ca) return tg('sendMessage', { chat_id: chat, ...(await walletCard(ca, false, priv)) })
   }
   if (priv && text && !text.startsWith('/')) {
     const c = findCoin(await coins(), text)
@@ -264,6 +477,7 @@ async function onMessage(m: any) {
 
 async function onCallback(q: any) {
   const data: string = q.data ?? ''
+  if (data === 'w:refresh') return refreshWallet(q)
   if (!data.startsWith('v:')) return tg('answerCallbackQuery', { callback_query_id: q.id })
   const r = checkAnswer(q.from.id, data)
   const chat = q.message.chat.id
@@ -324,11 +538,16 @@ async function setup(op: string, host: string) {
       chats: Object.fromEntries(chats),
       webhook: await tg('setWebhook', { url: `https://${host}/api/telegram`, secret_token: SECRET, allowed_updates: ['message', 'callback_query', 'my_chat_member'], drop_pending_updates: true }),
       commands: await tg('setMyCommands', { commands: [
+        { command: 'wallet', description: 'Your balances: send, receive, swap' },
         { command: 'coins', description: 'Top coins on the launchpad' },
         { command: 'coin', description: 'Look up a coin by ticker or CA' },
         { command: 'launch', description: 'Launch a coin' },
         { command: 'swap', description: 'Swap any token' },
         { command: 'bridge', description: 'Bring ACRUX over from Solana' },
+        { command: 'send', description: 'Send ACRUX or any token' },
+        { command: 'balance', description: 'Balances of any address' },
+        { command: 'ca', description: 'The $HUB contract address' },
+        { command: 'links', description: 'Official links' },
         { command: 'help', description: 'What the bot does' },
       ] }),
       menu: await tg('setChatMenuButton', { menu_button: { type: 'web_app', text: 'AcruxHub', web_app: { url: SITE } } }),
@@ -346,6 +565,8 @@ function logChat(u: any) {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // The Mini App reporting its wallet address (checked against Telegram's signature).
+  if (req.query.op === 'link') return linkEndpoint(req, res)
   if (req.method === 'GET' && req.query.op) {
     const got = String(req.headers['x-setup-secret'] ?? '')
     if (!SECRET || got.length !== SECRET.length || !timingSafeEqual(Buffer.from(got), Buffer.from(SECRET))) return res.status(401).end()
