@@ -7,6 +7,7 @@ import { short, fmt, NETWORKS, refreshDemoTokens, LAUNCHES_PAUSED } from './net.
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
 import { wacruxMint } from '@acruxhub/sdk'
 import { useAsync, deployed } from './hooks.ts'
+import { CopyButton } from './ui.tsx'
 import { Swap } from './pages/Swap.tsx'
 import { Pools } from './pages/Pools.tsx'
 import { Launch } from './pages/Launch.tsx'
@@ -23,6 +24,9 @@ export const SOCIAL = {
   github: 'https://github.com/AcruxHub/AcruxHub',
   telegram: 'https://t.me/AcruxHubPortal',
 }
+
+/** $HUB, AcruxHub's own coin: its CA shows on every page. */
+export const HUB_CA = 'AuVCwgJQRQP1EA655JLDP86uD7r6qEcQZRti4Htp5Uvp'
 
 // Routes are hash-based. #Launch stays the coins route so links people already shared keep working.
 const ROUTES = ['Launch', 'Swap', 'Wallet', 'Pools', 'Locks', 'Bridge', 'Explorer', 'Portfolio', 'Docs'] as const
@@ -82,6 +86,13 @@ export function App() {
           AcruxHub programs are not deployed on {w.network.name} yet. Explorer and Portfolio work now; trading pages go live once the programs are deployed.
         </div>
       )}
+
+      <div className="hub-bar">
+        <span className="hub-live">● $HUB is live</span>
+        <span className="hub-ca"><span className="faint">CA</span> <span className="mono">{HUB_CA}</span></span>
+        <CopyButton text={HUB_CA} />
+        <a className="hub-buy" href={`#Swap/${HUB_CA}`}>Buy $HUB →</a>
+      </div>
 
       <main>
         <PageBoundary resetKey={location.hash}>

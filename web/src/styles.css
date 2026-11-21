@@ -359,3 +359,11 @@ sub.zeros { font-size: .72em; vertical-align: -.25em; margin: 0 1px; color: var(
 @media (max-width: 420px) { .wallet-actions { grid-template-columns: repeat(2, 1fr); } }
 /* Narrow phones: logo only, so Create coin and the wallet fit on one row. */
 @media (max-width: 400px) { .brand span { display: none; } }
+
+/* $HUB live bar, under the header on every page */
+.hub-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 12px 0 0; padding: 8px 14px; border: 1px solid var(--line-2); border-radius: var(--r); background: var(--surface, #111217); font-size: 13px; }
+.hub-live { color: var(--good); font-weight: 700; }
+.hub-ca { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 200px; }
+.hub-ca .mono { color: var(--text); }
+.hub-buy { margin-left: auto; font-weight: 600; white-space: nowrap; }
+@media (max-width: 640px) { .hub-bar { gap: 8px; padding: 8px 10px; } .hub-ca { flex-basis: 100%; order: 3; font-size: 12px; white-space: normal; word-break: break-all; overflow: visible; } }
