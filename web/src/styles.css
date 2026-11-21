@@ -370,3 +370,4 @@ sub.zeros { font-size: .72em; vertical-align: -.25em; margin: 0 1px; color: var(
 
 /* A second, smaller line under a stat (the ACRUX figure under a dollar market cap). */
 .stats .stat-sub { display: block; font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stats .value:has(.stat-sub) { overflow: visible; height: auto; }
