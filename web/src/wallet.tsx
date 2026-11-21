@@ -6,7 +6,7 @@
 // slot's proposers) so no single proposer can read them before ordering.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { Connection, Keypair, PublicKey, Transaction } from '@solana/web3.js'
+import { Connection, Keypair, PublicKey, Transaction, type VersionedTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
 import { store } from './native.ts'
 import * as anchor from '@coral-xyz/anchor'
@@ -40,6 +40,8 @@ type Ctx = {
   /** Signs a transaction for ANOTHER chain (Solana, for the bridge) with the key wallet:
    * the same key is the same address on Solana and Acrux. Null for injected wallets. */
   signWithKey: ((tx: Transaction) => Transaction) | null
+  /** Same, for versioned transactions (e.g. a Jupiter swap on Solana). */
+  signVersionedWithKey: ((tx: VersionedTransaction) => VersionedTransaction) | null
   /** Signs and sends; returns a signature or Acrux tx id. */
   send(tx: Transaction, extraSigners?: Keypair[]): Promise<string>
   refreshKey: number
@@ -196,6 +198,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     exportTestKey: () => (test ? bs58.encode(test.secretKey) : null),
     importTestKey,
     signWithKey: !inj && test ? (tx: Transaction) => { tx.partialSign(test); return tx } : null,
+    signVersionedWithKey: !inj && test ? (tx: VersionedTransaction) => { tx.sign([test]); return tx } : null,
     privateMode: privateMode && !!network.gateway, setPrivateMode,
     provider, send, refreshKey, bump: () => setRefresh(r => r + 1),
   }

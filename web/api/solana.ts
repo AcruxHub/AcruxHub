@@ -21,16 +21,18 @@ const BRIDGE = decode58('EDm6HxGArNEgGfWRZwvj42f4euc9oPQWVUwUbkK3PEe5')
 // land) is the other thing the page sends: the Associated Token program plus the ACRUX mint.
 const ATA_PROGRAM = decode58('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
 const ACRUX_MINT = decode58('7Evw4uxTxLGGEFEvXLUNYyc1J7PnFk9EYwTUFagARUX')
+// A Jupiter swap (the Bridge page's "swap SOL for ACRUX" step): Jupiter's v6 program id.
+const JUPITER = decode58('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4')
 
 /** A signed transaction we're willing to relay: small, and it either names the bridge
- * program or opens an ACRUX token account. */
+ * program, is a Jupiter swap, or opens an ACRUX token account. */
 function isBridgeTx(params: unknown): boolean {
   if (!Array.isArray(params) || typeof params[0] !== 'string') return false
   const opts = params[1] as any
   if (opts?.encoding !== 'base64') return false // web3.js sends base64
   const raw = Buffer.from(params[0], 'base64')
   if (raw.length < 100 || raw.length > 1232) return false
-  return raw.indexOf(BRIDGE) !== -1 || (raw.indexOf(ATA_PROGRAM) !== -1 && raw.indexOf(ACRUX_MINT) !== -1)
+  return raw.indexOf(BRIDGE) !== -1 || raw.indexOf(JUPITER) !== -1 || (raw.indexOf(ATA_PROGRAM) !== -1 && raw.indexOf(ACRUX_MINT) !== -1)
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

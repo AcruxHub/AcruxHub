@@ -9,7 +9,7 @@
 // The way back (Acrux -> Solana, BridgeOut below) burns native ACRUX on Acrux with the
 // same bridge program; Acrux's relayer pays it out on Solana, usually within a minute.
 import { useEffect, useMemo, useState } from 'react'
-import { Connection, PublicKey, Transaction } from '@solana/web3.js'
+import { Connection, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token'
 import { acruxBridgeDeposit, acruxBridgeNextSequence, acruxBridgeWithdrawNative, acruxBridgeNextWithdrawal, ACRUX_MIN_WITHDRAWAL, ACRUX_SOLANA_MINT, ACRUX_SOLANA_DECIMALS } from '@acruxhub/sdk'
 import { useWallet } from '../wallet.tsx'
@@ -24,7 +24,7 @@ const MIN_SOL = 5_000_000n // 0.005 SOL for the fee and the deposit record's ren
 
 type SolWallet = {
   connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: { toString(): string } }>
-  signAndSendTransaction(tx: Transaction): Promise<{ signature: string }>
+  signAndSendTransaction(tx: Transaction | VersionedTransaction): Promise<{ signature: string }>
 }
 const solanaWallet = (): SolWallet | null => {
   const w = window as any
@@ -32,10 +32,10 @@ const solanaWallet = (): SolWallet | null => {
 }
 
 /** Waits for a Solana signature to confirm (polling: our proxy has no websocket). */
-async function confirmSolana(sol: Connection, sig: string) {
+async function confirmSolana(sol: Connection, sig: string, what = 'The bridge deposit') {
   for (let i = 0; i < 60; i++) {
     const st = (await sol.getSignatureStatuses([sig]).catch(() => null))?.value[0]
-    if (st?.err) throw new Error(`The bridge deposit failed on Solana: ${JSON.stringify(st.err)}`)
+    if (st?.err) throw new Error(`${what} failed on Solana: ${JSON.stringify(st.err)}`)
     if (st && (st.confirmationStatus === 'confirmed' || st.confirmationStatus === 'finalized')) return
     await new Promise(r => setTimeout(r, 2000))
   }
@@ -65,6 +65,8 @@ export function Bridge() {
     if (!viaKey) ext?.connect({ onlyIfTrusted: true }).then(r => setExtFrom(new PublicKey(r.publicKey.toString()))).catch(() => {})
   }, [viaKey])
 
+  // After a SOL -> ACRUX swap: refresh, and fill the bridge amount with everything they now hold.
+  const [fillAfterSwap, setFillAfterSwap] = useState(false)
   const balances = useAsync(async () => {
     if (!from) return null
     const [acrux, lamports] = await Promise.all([
@@ -73,8 +75,14 @@ export function Bridge() {
     ])
     return { acrux, lamports }
   }, [from?.toBase58(), tick])
+  useEffect(() => {
+    if (fillAfterSwap && balances.data && balances.data.acrux > 0n) {
+      setAmt(fmt(balances.data.acrux, ACRUX_SOLANA_DECIMALS, ACRUX_SOLANA_DECIMALS).replace(/,/g, ''))
+      setFillAfterSwap(false)
+    }
+  }, [fillAfterSwap, balances.data])
   // Funding a fresh wallet on Solana: check again every few seconds until it shows up.
-  const empty = !!balances.data && (balances.data.acrux === 0n || balances.data.lamports < MIN_SOL)
+  const empty = !!balances.data && balances.data.lamports < MIN_SOL
   useEffect(() => {
     if (!empty) return
     const t = setInterval(() => setTick(x => x + 1), 8000)
@@ -102,7 +110,7 @@ export function Bridge() {
 
   const problems = [
     !raw || raw <= 0n ? 'Enter an amount.' : null,
-    balances.data && raw && raw > balances.data.acrux ? 'That is more ACRUX than this wallet holds on Solana.' : null,
+    balances.data && raw && raw > balances.data.acrux ? (balances.data.acrux === 0n ? 'No ACRUX on Solana yet: swap some SOL for it in step 1 above.' : 'That is more ACRUX than this wallet holds on Solana.') : null,
     balances.data && balances.data.lamports < MIN_SOL ? 'This wallet needs about 0.005 SOL on Solana for the fee.' : null,
     !recipient ? 'That Acrux address is not valid.' : null,
   ].filter(Boolean) as string[]
@@ -193,11 +201,16 @@ export function Bridge() {
                 <p className="mono" style={{ wordBreak: 'break-all', margin: '8px 0' }}>{from.toBase58()}</p>
                 <CopyButton text={from.toBase58()} label="Copy address" />
                 <p style={{ margin: '10px 0 0', fontSize: 13 }}>
-                  From Phantom or an exchange, send to it <strong>on Solana</strong>: your ACRUX, plus about <strong>0.01 SOL</strong> for fees.
-                  {' '}Balances below update by themselves. Already hold ACRUX in Phantom? You can also import that wallet's key here instead.
+                  From Phantom or an exchange, send to it <strong>on Solana</strong>: SOL (step 1 below swaps it for ACRUX), or ACRUX plus about <strong>0.02 SOL</strong> for fees.
+                  {' '}Balances below update by themselves.
                 </p>
               </div>
             )}
+            {balances.data && (
+              <SwapSol sol={sol} from={from} lamports={balances.data.lamports} acrux={balances.data.acrux} viaKey={viaKey} ext={ext}
+                onDone={() => { setFillAfterSwap(true); setTick(x => x + 1) }} />
+            )}
+            <h3 className="step-title">Step 2 · Bridge ACRUX to Acrux</h3>
             <div className="token-box">
               <div className="token-box-head"><span>From Solana</span>
                 <button className="ghost" style={{ padding: 0 }} onClick={() => balances.data && setAmt(fmt(balances.data.acrux, ACRUX_SOLANA_DECIMALS, ACRUX_SOLANA_DECIMALS).replace(/,/g, ''))}>
@@ -248,6 +261,130 @@ export function Bridge() {
         {isTelegram ? ' Your key stays in this phone’s secure storage; the bot never sees it.' : ''}
         {' '}The bridge is run by Acrux; <a href="https://acrux.computer/bridge" target="_blank" rel="noopener noreferrer">their page</a> shows every transfer.
       </p>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------------ step 1: SOL -> ACRUX on Solana
+
+// Acrux's bridge takes ACRUX, so someone holding only SOL swaps first. Jupiter finds the
+// route (today the Raydium ACRUX/SOL pool); the user's own wallet signs on Solana.
+const JUP = 'https://lite-api.jup.ag/swap/v1'
+const WSOL = 'So11111111111111111111111111111111111111112'
+/** SOL left behind for Solana fees, the ACRUX token account's rent and the bridge record's rent. */
+const SOL_RESERVE = 20_000_000n // 0.02 SOL
+const SLIPPAGE_BPS = 100
+
+type JupQuote = { outAmount: string; otherAmountThreshold: string; priceImpactPct: string; inAmount: string }
+
+function SwapSol({ sol, from, lamports, acrux, viaKey, ext, onDone }: { sol: Connection; from: PublicKey; lamports: bigint; acrux: bigint; viaKey: boolean; ext: SolWallet | null; onDone: () => void }) {
+  const w = useWallet()
+  // Open by default for someone holding SOL but no ACRUX on Solana: that's who needs it.
+  const [open, setOpen] = useState(acrux === 0n)
+  const [amt, setAmt] = useState('')
+  const [quote, setQuote] = useState<JupQuote | null>(null)
+  const [quoteErr, setQuoteErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const [done, setDone] = useState<{ sig: string; out: bigint } | null>(null)
+  const raw = parseAmount(amt, 9)
+  const max = lamports > SOL_RESERVE ? lamports - SOL_RESERVE : 0n
+
+  // Quote as they type (debounced).
+  useEffect(() => {
+    setQuote(null); setQuoteErr(null)
+    if (!raw || raw <= 0n || raw > max) return
+    let live = true
+    const t = setTimeout(async () => {
+      try {
+        const r = await fetch(`${JUP}/quote?inputMint=${WSOL}&outputMint=${ACRUX_SOLANA_MINT.toBase58()}&amount=${raw}&slippageBps=${SLIPPAGE_BPS}`)
+        const j = await r.json()
+        if (!live) return
+        if (!r.ok || !j.outAmount) throw new Error(j.error ?? 'No route right now. Try a different amount.')
+        setQuote(j)
+      } catch (e: any) { if (live) setQuoteErr(e?.message ?? String(e)) }
+    }, 400)
+    return () => { live = false; clearTimeout(t) }
+  }, [raw?.toString(), max.toString()])
+
+  const impact = quote ? Number(quote.priceImpactPct) * 100 : 0
+  const problems = [
+    !raw || raw <= 0n ? 'Enter how much SOL to swap.' : null,
+    raw && raw > max ? (max > 0n ? `You can swap up to ${fmt(max, 9, 4)} SOL (about 0.02 SOL stays for fees).` : 'This wallet needs more than 0.02 SOL on Solana: fees and account rent come out of that.') : null,
+    quoteErr,
+  ].filter(Boolean) as string[]
+
+  async function swap() {
+    setErr(null); setBusy('Getting the best price…')
+    try {
+      // A fresh quote, so the price signed is the price now.
+      const q = await (await fetch(`${JUP}/quote?inputMint=${WSOL}&outputMint=${ACRUX_SOLANA_MINT.toBase58()}&amount=${raw}&slippageBps=${SLIPPAGE_BPS}`)).json()
+      if (!q.outAmount) throw new Error(q.error ?? 'No route right now. Try again in a moment.')
+      const r = await (await fetch(`${JUP}/swap`, {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ quoteResponse: q, userPublicKey: from.toBase58(), wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, prioritizationFeeLamports: 'auto' }),
+      })).json()
+      if (!r.swapTransaction) throw new Error(r.error ?? 'Jupiter could not build the swap. Try again.')
+      const tx = VersionedTransaction.deserialize(Buffer.from(r.swapTransaction, 'base64'))
+      setBusy(viaKey ? 'Swapping…' : 'Confirm in your wallet…')
+      let sig: string
+      if (viaKey) {
+        w.signVersionedWithKey!(tx)
+        sig = await sol.sendRawTransaction(tx.serialize(), { skipPreflight: false, preflightCommitment: 'confirmed', maxRetries: 3 })
+      } else {
+        sig = (await ext!.signAndSendTransaction(tx)).signature
+      }
+      setBusy('Confirming on Solana…')
+      await confirmSolana(sol, sig, 'The swap')
+      setDone({ sig, out: BigInt(q.outAmount) })
+      setAmt('')
+      tap('success')
+      onDone()
+    } catch (e: any) {
+      const m = e?.message ?? String(e)
+      setErr(/0x1771|slippage|SlippageToleranceExceeded/i.test(m) ? 'The price moved before it went through. Nothing was swapped: try again.' : /insufficient|0x1\b/i.test(m) ? 'Not enough SOL for this swap plus fees. Try a smaller amount.' : m)
+      tap('error')
+    } finally { setBusy(null) }
+  }
+
+  if (!open) {
+    return (
+      <p className="muted" style={{ margin: '0 0 14px', fontSize: 13 }}>
+        Have SOL but no ACRUX? <button className="ghost" style={{ padding: 0 }} onClick={() => setOpen(true)}>Swap SOL for ACRUX first →</button>
+      </p>
+    )
+  }
+  return (
+    <div className="swap-step">
+      <h3 className="step-title">Step 1 · Swap SOL for ACRUX on Solana</h3>
+      <p className="muted" style={{ margin: '0 0 10px', fontSize: 13 }}>The bridge carries ACRUX, so turn some SOL into ACRUX first. Skip this if you already hold ACRUX on Solana.</p>
+      <div className="token-box">
+        <div className="token-box-head"><span>You pay</span>
+          <button className="ghost" style={{ padding: 0 }} onClick={() => setAmt(fmt(max, 9, 9).replace(/,/g, ''))}>
+            You have <span className="num">{fmt(lamports, 9, 4)}</span> SOL
+          </button>
+        </div>
+        <div className="token-box-row">
+          <input inputMode="decimal" value={amt} onChange={e => setAmt(e.target.value)} placeholder="0" aria-label="SOL to swap" />
+          <span className="token-badge">SOL</span>
+        </div>
+      </div>
+      <div className="flip" aria-hidden="true">↓</div>
+      <div className="token-box">
+        <div className="token-box-head"><span>You get on Solana</span></div>
+        <div className="token-box-row">
+          <span className="num" style={{ fontSize: 22 }}>{quote ? fmt(BigInt(quote.outAmount), ACRUX_SOLANA_DECIMALS, 2) : '0'}</span>
+          <span className="token-badge">ACRUX</span>
+        </div>
+        {quote && <small className="muted">At least {fmt(BigInt(quote.otherAmountThreshold), ACRUX_SOLANA_DECIMALS, 2)} ACRUX · price impact {impact.toFixed(2)}% · via Jupiter</small>}
+      </div>
+      {quote && impact >= 5 && <p className="error" style={{ marginBottom: 0 }}>Price impact is {impact.toFixed(1)}%: the ACRUX pool on Solana is small, so a big swap costs you. Splitting it into smaller swaps is cheaper.</p>}
+      {problems.length > 0 && amt && <p className="error" style={{ marginBottom: 0 }}>{problems[0]}</p>}
+      <button className="primary" style={{ width: '100%', height: 44, marginTop: 14 }} disabled={!!busy || problems.length > 0 || !quote} onClick={swap}>
+        {busy ?? (quote ? `Swap ${amt} SOL for ACRUX` : 'Swap SOL for ACRUX')}
+      </button>
+      {done && <p className="up" style={{ margin: '10px 0 0', fontSize: 13 }}>Swapped for {fmt(done.out, ACRUX_SOLANA_DECIMALS, 2)} ACRUX · <a href={`https://solscan.io/tx/${done.sig}`} target="_blank" rel="noopener noreferrer">view</a>. Step 2 is filled in: bridge it below.</p>}
+      {err && <p className="error">{err}</p>}
     </div>
   )
 }
