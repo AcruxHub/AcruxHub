@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useWallet } from './wallet.tsx'
+import { useWallet, storedKeyAddress } from './wallet.tsx'
 import { KeyBackup, KeyImport } from './keys.tsx'
 import { PageBoundary } from './boundary.tsx'
 import { inApp, secureWallet } from './native.ts'
@@ -169,6 +169,8 @@ function WalletButton() {
   const [open, setOpen] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [modal, setModal] = useState<'backup' | 'import' | null>(null)
+  const savedKey = inApp ? null : storedKeyAddress()
+  const hasExtension = typeof window !== 'undefined' && !!((window as any).phantom?.solana ?? (window as any).backpack ?? (window as any).solana)
   // ACRUX the wallet holds: native plus wrapped (the site wraps for you, so both spend).
   const [tick, setTick] = useState(0)
   useEffect(() => { const t = setInterval(() => setTick(x => x + 1), 15_000); return () => clearInterval(t) }, [])
@@ -193,9 +195,21 @@ function WalletButton() {
         <button onClick={() => setOpen(o => !o)}>Connect</button>
         {open && (
           <div className="menu">
-            {!inApp && <button onClick={() => w.connectInjected().then(() => setOpen(false), e => setErr(e.message))}>Browser wallet <small>Phantom, Backpack…</small></button>}
-            <button onClick={() => { w.connectTest(); setOpen(false) }}>{secureWallet ? 'App wallet' : 'Browser key'} <small>{secureWallet ? 'a key kept in this phone’s secure storage' : 'kept in this browser: small amounts only'}</small></button>
-            <button onClick={() => { setModal('import'); setOpen(false) }}>Import a key <small>restore a backup, or move a wallet in</small></button>
+            {inApp ? (
+              <>
+                <button onClick={() => { w.connectTest(); setOpen(false) }}>{secureWallet ? 'App wallet' : 'Browser key'} <small>{secureWallet ? 'a key kept in this phone’s secure storage' : 'kept in this browser: small amounts only'}</small></button>
+                <button onClick={() => { setModal('import'); setOpen(false) }}>Import a key <small>restore a backup, or move a wallet in</small></button>
+              </>
+            ) : (
+              <>
+                {/* On the website you connect the wallet your coins are in: Phantom or Backpack.
+                    Bridging in and out then uses that same wallet, both ways. */}
+                {hasExtension
+                  ? <button onClick={() => w.connectInjected().then(() => setOpen(false), e => setErr(e.message))}>Phantom / Backpack <small>the wallet your coins are in</small></button>
+                  : <p className="muted" style={{ padding: '8px 12px', margin: 0, fontSize: 13 }}>Install <a href="https://phantom.app" target="_blank" rel="noopener noreferrer">Phantom</a> and reload, or use AcruxHub in Telegram: <a href="https://t.me/AcruxHubAppBot" target="_blank" rel="noopener noreferrer">@AcruxHubAppBot</a></p>}
+                {savedKey && <button onClick={() => { w.connectTest(); setOpen(false) }}>Saved browser key <small>{short(savedKey)}: open it to move its funds to your wallet</small></button>}
+              </>
+            )}
             {err && <p className="error" style={{ padding: '0 12px' }}>{err}</p>}
           </div>
         )}

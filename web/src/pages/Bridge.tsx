@@ -48,10 +48,11 @@ export function Bridge() {
   const ext = solanaWallet()
   // The app's key wallet signs on Solana itself; inside Telegram and the apps it's the default.
   const keyWallet = !!w.signWithKey && !!w.publicKey
-  const [useExt, setUseExt] = useState(() => !inApp && !!ext && !keyWallet)
-  const viaKey = keyWallet && !(useExt && ext)
+  // Bridging always uses the connected wallet, in both directions: a key wallet signs the
+  // Solana side itself; Phantom/Backpack (connected on the site) signs it there.
+  const viaKey = keyWallet
   const [extFrom, setExtFrom] = useState<PublicKey | null>(null)
-  const from = viaKey ? w.publicKey : extFrom
+  const from = viaKey ? w.publicKey : (w.kind === 'injected' ? w.publicKey : extFrom)
   const [err, setErr] = useState<string | null>(null)
   const [amt, setAmt] = useState('')
   const [to, setTo] = useState('')
@@ -163,14 +164,8 @@ export function Bridge() {
     )
   }
 
-  const pickSource = (keyWallet && ext) ? (
-    <div className="seg" style={{ marginBottom: 12 }} role="tablist" aria-label="Bridge from">
-      <button className={viaKey ? 'on' : ''} onClick={() => setUseExt(false)}>This wallet</button>
-      <button className={!viaKey ? 'on' : ''} onClick={() => setUseExt(true)}>Phantom / Backpack</button>
-    </div>
-  ) : null
-
-  const connectExt = () => ext!.connect().then(r => setExtFrom(new PublicKey(r.publicKey.toString())), e => setErr(e.message))
+  // Connecting here connects it site-wide, so the way back pays the same wallet.
+  const connectExt = () => w.connectInjected().catch(e => setErr(e.message))
 
   return (
     <div className="narrow">
@@ -181,11 +176,10 @@ export function Bridge() {
       {dirToggle}
 
       <div className="card">
-        {pickSource}
         {!keyWallet && !ext ? (
           inApp ? <NeedWallet /> : (
             <p className="muted" style={{ margin: 0 }}>
-              Bridging needs a wallet: create one with Connect (top right), or install Phantom or Backpack and reload this page.
+              Bridging needs Phantom or Backpack: install one and reload this page, or bridge inside Telegram with <a href="https://t.me/AcruxHubAppBot" target="_blank" rel="noopener noreferrer">@AcruxHubAppBot</a>.
             </p>
           )
         ) : !from ? (

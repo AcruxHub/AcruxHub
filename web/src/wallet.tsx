@@ -8,7 +8,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Connection, Keypair, PublicKey, Transaction, type VersionedTransaction } from '@solana/web3.js'
 import bs58 from 'bs58'
-import { store } from './native.ts'
+import { store, inApp } from './native.ts'
 import * as anchor from '@coral-xyz/anchor'
 import { privateSend, waitForTx } from '@acruxhub/sdk'
 import { NETWORKS, connectionFor, type Network } from './net.ts'
@@ -79,7 +79,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // The wallet this visitor last chose ('key' | 'injected' | 'none'). Before this was kept,
   // a saved browser key always reconnected on load, so Phantom users had to disconnect it
   // and reconnect Phantom on every visit. Visitors from before (no choice saved) keep their key.
-  const [test, setTest] = useState<Keypair | null>(() => (['injected', 'none'].includes(store.get(CHOICE_STORE) ?? '') ? null : storedKey()))
+  const [test, setTest] = useState<Keypair | null>(() => {
+    const choice = store.get(CHOICE_STORE) ?? ''
+    if (!inApp) return choice === 'key' ? storedKey() : null
+    return ['injected', 'none'].includes(choice) ? null : storedKey()
+  })
   const [inj, setInj] = useState<{ w: Injected; pk: PublicKey } | null>(null)
   // Chose Phantom/Backpack last time: reconnect quietly (onlyIfTrusted shows no popup).
   useEffect(() => {
