@@ -133,7 +133,6 @@ function BoardSkeleton() {
 // ------------------------------------------------------------------ board
 /** Retired launches (the shared list in data.ts): kept off the board. */
 const HIDDEN_COINS = new Set(RETIRED_COINS)
-const HIDDEN_COINS = new Set(['99ysnj1KnpG6mpEZa1kjN8JCkjDZifpjWL6r4gUPKYjN'])
 /** Coins priced in the faucet's demo tokens, from before Acrux's gas switch: worth nothing. */
 const isTestCoin = (q: Quote) => !!KNOWN_TOKENS[q.quoteMint.toBase58()]
 
