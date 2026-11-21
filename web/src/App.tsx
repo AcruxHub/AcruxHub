@@ -211,7 +211,7 @@ function WalletButton() {
           {acrux.data && (
             <div className="menu-balance">
               <strong className="num">{fmt(acrux.data.total, 9, 4)} ACRUX</strong>
-              <small>{acrux.data.wrapped > 0n ? `${fmt(acrux.data.native, 9, 4)} ACRUX + ${fmt(acrux.data.wrapped, 9, 4)} wrapped` : 'available to trade (a little is kept for fees)'}</small>
+              <small>{acrux.data.wrapped > 0n ? `${fmt(acrux.data.native, 9, 4)} ACRUX + ${fmt(acrux.data.wrapped, 9, 4)} wrapped` : 'your balance (trades keep 0.01 back for network fees)'}</small>
             </div>
           )}
           <button onClick={() => { navigator.clipboard.writeText(w.publicKey!.toBase58()); setOpen(false) }}>Copy address</button>
