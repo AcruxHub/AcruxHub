@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Keypair, ComputeBudgetProgram, PublicKey, Transaction } from '@solana/web3.js'
-import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } from '@solana/spl-token'
+import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, getMint } from '@solana/spl-token'
 import {
   launchConfig, launchAddress, launchPairAddress, launchPauseAddress, allAccounts, curveBuy, curveSell, curveProgress, stateOf, graduateAccounts, BN,
-  graduateRaydiumAccounts, loadCpmmFeeTiers, cpmmPoolAddresses, CPMM_POOL_SIZE, RAYDIUM_CPMM_ID, holderStatus, discountedFeeBps,
+  graduateRaydiumAccounts, loadCpmmFeeTiers, cpmmPoolAddresses, CPMM_POOL_SIZE, RAYDIUM_CPMM_ID, holderStatus, discountedFeeBps, LOCKER_ID, loadLocks, lockerProgram,
   type CurveState,
 } from '@acruxhub/sdk'
 import { useWallet, readProvider } from '../wallet.tsx'
@@ -13,7 +13,7 @@ import { fmt, parseAmount, short, LAUNCHES_PAUSED, KNOWN_TOKENS } from '../net.t
 import { Action, CopyButton, Price } from '../ui.tsx'
 import { useMeta, safeUrl, uploadCoin, readImage, type CoinMeta } from '../meta.ts'
 import { launchpadUpgraded, launchpadFor } from '../launchpad.ts'
-import { loadTrades, holdersFromTrades, ago, compact, fmtPrice, openingPrice, type Trade } from '../history.ts'
+import { loadTrades, loadHolders, holdersFromTrades, type Holder, ago, compact, fmtPrice, openingPrice, type Trade } from '../history.ts'
 import { PriceChart } from '../chart.tsx'
 import { wrapFor, spendable } from '../wrap.ts'
 import { useLocked, lockDate } from './Locks.tsx'
@@ -138,6 +138,7 @@ const isTestCoin = (q: Quote) => !!KNOWN_TOKENS[q.quoteMint.toBase58()]
 function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNote, paused }: {
   launches: LaunchRow[] | null; loading: boolean; error: string | null; quoteOf: (l: LaunchRow) => Quote; totalSupply: bigint; query: string; pausedNote: string | null; paused: boolean
 }) {
+  const w = useWallet()
   const [tab, setTab] = useState<Tab>('top')
   const [q, setQ] = useState(query)
   useEffect(() => setQ(query), [query])
@@ -162,6 +163,13 @@ function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNo
     return xs.filter(l => l.account.graduated)
   }, [filtered.length, tab, needle, launches])
   // The coin closest to graduating, not yet complete, gets the spotlight.
+  // Locked supply per token, one read for the whole board.
+  const allLocks = useAsync(() => loadLocks(w.conn, lockerProgram(readProvider(w.conn))), [w.conn, w.refreshKey])
+  const lockedBy = useMemo(() => {
+    const m = new Map<string, bigint>()
+    for (const k of allLocks.data ?? []) m.set(k.mint.toBase58(), (m.get(k.mint.toBase58()) ?? 0n) + k.amount)
+    return m
+  }, [allLocks.data])
   const feature = all.filter(l => !l.account.complete && !l.account.graduated && progress(l) > 0).sort((a, b) => progress(b) - progress(a))[0]
 
   return (
@@ -193,7 +201,7 @@ function Board({ launches, loading, error, quoteOf, totalSupply, query, pausedNo
         </div>
       )}
       <div className="coin-grid">
-        {list.map(l => <CoinCard key={l.publicKey.toBase58()} l={l} {...quoteOf(l)} totalSupply={totalSupply} />)}
+        {list.map(l => <CoinCard key={l.publicKey.toBase58()} l={l} {...quoteOf(l)} totalSupply={totalSupply} locked={lockedBy.get(l.account.mint.toBase58()) ?? 0n} />)}
       </div>
     </>
   )
@@ -212,20 +220,50 @@ function Status({ a, s }: { a: any; s: CurveState }) {
   return <span className="num faint" style={{ fontSize: 12 }}>{(curveProgress(s) * 100).toFixed(1)}%</span>
 }
 
+/** "🔒 42.9% locked", for any coin with tokens in the locker. */
+export function LockTag({ locked, totalSupply }: { locked: bigint; totalSupply: bigint }) {
+  if (locked <= 0n || totalSupply <= 0n) return null
+  const p = (Number(locked) / Number(totalSupply)) * 100
+  return <span className="pill good" title="Tokens locked on chain until a date">🔒 {p.toFixed(p < 1 ? 2 : 1)}% locked</span>
+}
+
+/** Live price, supply and market cap. A graduated coin trades in its Raydium pool, so
+ * its price comes from the pool's vaults, and graduation burned the unsold tokens, so
+ * its supply is the mint's real supply. Coins on the curve use the curve. */
+function useMarket(l: LaunchRow, qd: number, totalSupply: bigint) {
+  const w = useWallet()
+  const a = l.account
+  const pool = useAsync(async () => {
+    if (!a.graduated) return null
+    const info = await w.conn.getAccountInfo(a.pool)
+    if (!info || info.data.length !== CPMM_POOL_SIZE) return null
+    const d = info.data
+    const vA = new PublicKey(d.subarray(72, 104)), vB = new PublicKey(d.subarray(104, 136)), mint0 = new PublicKey(d.subarray(168, 200))
+    const [bA, bB, mint] = await Promise.all([w.conn.getTokenAccountBalance(vA), w.conn.getTokenAccountBalance(vB), getMint(w.conn, a.mint)])
+    const tokenIsA = mint0.equals(a.mint)
+    const tok = Number((tokenIsA ? bA : bB).value.uiAmountString), quote = Number((tokenIsA ? bB : bA).value.uiAmountString)
+    return tok > 0 ? { price: quote / tok, supply: mint.supply } : null
+  }, [w.conn, a.pool.toBase58(), a.graduated, w.refreshKey])
+  const price = pool.data?.price ?? priceOf(stateOf(a), qd)
+  const supply = pool.data?.supply ?? totalSupply
+  return { price, supply, mcap: price * (Number(supply) / 10 ** TOKEN_DECIMALS), live: !!pool.data }
+}
+
 function mcapOf(s: CurveState, qd: number, totalSupply: bigint) {
   return priceOf(s, qd) * (Number(totalSupply) / 10 ** TOKEN_DECIMALS)
 }
 
-function CoinCard({ l, quoteSym, qd, totalSupply }: { l: LaunchRow; totalSupply: bigint } & Quote) {
+function CoinCard({ l, quoteSym, qd, totalSupply, locked }: { l: LaunchRow; totalSupply: bigint; locked: bigint } & Quote) {
   const a = l.account
   const s = stateOf(a)
   const meta = useMeta(a.uri)
+  const mk = useMarket(l, qd, totalSupply)
   return (
     <button className="coin-card" onClick={() => { location.hash = `#Launch/${l.publicKey.toBase58()}` }}>
       <CoinImage meta={meta} symbol={a.symbol} size={72} />
       <div className="coin-body">
         <div className="coin-title"><strong>{a.name}</strong><span className="tick">${a.symbol}</span></div>
-        <div className="coin-meta"><span>MC <span className="coin-mcap">{compact(mcapOf(s, qd, totalSupply))}</span> {quoteSym}</span><Status a={a} s={s} /></div>
+        <div className="coin-meta"><span>MC <span className="coin-mcap">{compact(mk.mcap)}</span> {quoteSym}</span><span className="row" style={{ gap: 6 }}><LockTag locked={locked} totalSupply={mk.supply} /><Status a={a} s={s} /></span></div>
         <div className={`bar${a.graduated ? ' good' : ''}`}><div style={{ width: `${a.graduated ? 100 : curveProgress(s) * 100}%` }} /></div>
         {meta?.description ? <p className="coin-desc">{meta.description}</p> : <p className="coin-desc faint">by {short(a.creator)}</p>}
       </div>
@@ -266,8 +304,9 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
   const trades = useAsync(() => loadTrades(w.conn, program, l.publicKey), [w.conn, program, l.publicKey.toBase58(), w.refreshKey])
   const curveBal = useAsync(async () => BigInt((await w.conn.getTokenAccountBalance(a.curveTokens)).value.amount), [w.conn, a.curveTokens.toBase58(), w.refreshKey])
   const [tab, setTab] = useState<'trades' | 'holders' | 'about'>('trades')
+  const mk = useMarket(l, qd, totalSupply)
   const locked = useLocked(a.mint)
-  const lockedPct = locked.data && totalSupply > 0n ? (Number(locked.data.total) / Number(totalSupply)) * 100 : 0
+  const lockedPct = locked.data && mk.supply > 0n ? (Number(locked.data.total) / Number(mk.supply)) * 100 : 0
 
   const pts = useMemo(() => {
     const ts = trades.data ?? []
@@ -278,9 +317,11 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
     return out
   }, [trades.data, qd])
   const first = pts[0]?.value
-  const now = priceOf(s, qd)
+  const now = mk.price
   const change = first ? (now / first - 1) * 100 : 0
-  const holders = useMemo(() => holdersFromTrades(trades.data ?? []), [trades.data])
+  // Real balances from the chain; until they load (or if the read fails), fall back to curve trades.
+  const chainHolders = useAsync(() => loadHolders(w.conn, a.mint, a.curveTokens, LOCKER_ID), [w.conn, a.mint.toBase58(), w.refreshKey])
+  const holders = useMemo<Holder[]>(() => chainHolders.data ?? holdersFromTrades(trades.data ?? []).map(([owner, amount]) => ({ owner, amount, kind: 'wallet' as const })), [chainHolders.data, trades.data])
   const progress = curveProgress(s)
 
   return (
@@ -303,7 +344,7 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
           </div>
 
           <div className="stats">
-            <div><span className="label">Market cap</span><span className="value">{compact(mcapOf(s, qd, totalSupply))} <small>{quoteSym}</small></span></div>
+            <div><span className="label">Market cap</span><span className="value">{compact(mk.mcap)} <small>{quoteSym}</small></span></div>
             <div><span className="label">Price</span><span className="value"><Price text={fmtPrice(now)} /></span></div>
             <div><span className="label">Change</span><span className={`value ${change >= 0 ? 'up' : 'down'}`}>{pts.length ? `${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '–'}</span></div>
             <div><span className="label">Trades</span><span className="value">{trades.data ? trades.data.length : '…'}</span></div>
@@ -321,12 +362,12 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
               {(['trades', 'holders', 'about'] as const).map(t => <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)}>{t === 'trades' ? 'Trades' : t === 'holders' ? 'Holders' : 'About'}</button>)}
             </div>
             {tab === 'trades' && <TradesTable trades={trades.data ?? null} quoteSym={quoteSym} qd={qd} symbol={a.symbol} />}
-            {tab === 'holders' && <Holders holders={holders} curve={curveBal.data ?? null} totalSupply={totalSupply} graduated={a.graduated} />}
+            {tab === 'holders' && <Holders holders={holders} live={!!chainHolders.data} curve={curveBal.data ?? null} totalSupply={mk.supply} graduated={a.graduated} />}
             {tab === 'about' && (
               <div style={{ paddingTop: 12 }}>
                 {meta?.description ? <p style={{ whiteSpace: 'pre-wrap', marginTop: 0 }}>{meta.description}</p> : <p className="muted" style={{ marginTop: 0 }}>No description.</p>}
                 <dl className="kv">
-                  <dt>Supply</dt><dd>{fmt(totalSupply, TOKEN_DECIMALS, 0)}, fixed</dd>
+                  <dt>Supply</dt><dd>{fmt(mk.supply, TOKEN_DECIMALS, 0)}{a.graduated && mk.live ? ', unsold tokens burned at graduation' : ', fixed'}</dd>
                   <dt>Trade fee</dt><dd>{a.feeBps / 100}%</dd>
                   <dt>Pairs with</dt><dd>{quoteSym}</dd>
                   <dt>Locked</dt><dd>{locked.data?.count ? <>{lockedPct.toFixed(2)}% of supply in {locked.data.count} lock{locked.data.count === 1 ? '' : 's'}, first unlock {lockDate(locked.data.next!)}</> : 'none'} · <a href={`#Locks/${a.mint.toBase58()}`}>lock tokens</a></dd>
@@ -388,18 +429,30 @@ function TradesTable({ trades, quoteSym, qd, symbol }: { trades: Trade[] | null;
   )
 }
 
-function Holders({ holders, curve, totalSupply, graduated }: { holders: [string, bigint][]; curve: bigint | null; totalSupply: bigint; graduated: boolean }) {
+function Holders({ holders, live, curve, totalSupply, graduated }: { holders: Holder[]; live: boolean; curve: bigint | null; totalSupply: bigint; graduated: boolean }) {
   const pct = (v: bigint) => `${((Number(v) / Number(totalSupply)) * 100).toFixed(2)}%`
+  const wallets = holders.filter(h => h.kind === 'wallet')
+  const shown = live ? holders : [...(curve != null && !graduated ? [{ owner: 'curve', amount: curve, kind: 'curve' as const }] : []), ...holders]
+  const name = (h: Holder) => h.kind === 'curve' ? 'Bonding curve' : h.kind === 'lock' ? '🔒 Token locks' : h.kind === 'pool' ? 'Liquidity pool' : null
+  let rank = 0
   return (
     <div className="holders" style={{ paddingTop: 6 }}>
+      <p className="muted" style={{ margin: '0 0 8px' }}><strong className="num" style={{ color: 'var(--text)' }}>{wallets.length}</strong> holder{wallets.length === 1 ? '' : 's'}</p>
       <ol>
-        {curve != null && !graduated && <li><span>Bonding curve</span><span className="num">{pct(curve)}</span></li>}
-        {holders.slice(0, 20).map(([u, v], i) => (
-          <li key={u}><span><span className="faint num" style={{ marginRight: 8 }}>{i + 1}.</span><a href={`#Explorer/${u}`} className="mono">{short(u)}</a></span><span className="num">{pct(v)}</span></li>
-        ))}
+        {shown.slice(0, 25).map(h => {
+          const label = name(h)
+          return (
+            <li key={h.kind + h.owner}>
+              <span>{label
+                ? <span className="muted">{label}</span>
+                : <><span className="faint num" style={{ marginRight: 8 }}>{++rank}.</span><a href={`#Explorer/${h.owner}`} className="mono">{short(h.owner)}</a></>}</span>
+              <span className="num">{pct(h.amount)}</span>
+            </li>
+          )
+        })}
       </ol>
-      {!holders.length && <p className="muted">No holders yet.</p>}
-      <p className="faint" style={{ fontSize: 12, marginBottom: 0 }}>From curve buys and sells. Transfers between wallets aren't counted.</p>
+      {!shown.length && <p className="muted">No holders yet.</p>}
+      <p className="faint" style={{ fontSize: 12, marginBottom: 0 }}>{live ? 'Live balances from the chain.' : 'Loading live balances… showing curve buys and sells for now.'}</p>
     </div>
   )
 }

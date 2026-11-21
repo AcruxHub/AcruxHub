@@ -3,7 +3,7 @@
 // virtual_quote / virtual_tokens. Acrux's RPC has no getTokenLargestAccounts, so
 // holders are reconstructed from curve trades (wallet transfers aren't seen).
 import * as anchor from '@coral-xyz/anchor'
-import type { Connection, PublicKey } from '@solana/web3.js'
+import { PublicKey, type Connection } from '@solana/web3.js'
 
 export type Trade = {
   sig: string
@@ -105,4 +105,52 @@ export function openingPrice(t: Trade, feeBps: number, vq: number, vt: number) {
   const vqBefore = t.buy ? vq - net : vq + net
   const vtBefore = t.buy ? vt + Number(t.tokens) : vt - Number(t.tokens)
   return vtBefore > 0 ? vqBefore / vtBefore : t.price
+}
+
+export type Holder = { owner: string; amount: bigint; kind: 'wallet' | 'curve' | 'lock' | 'pool' }
+
+/** Real holders of a token, read from the chain. Acrux's RPC has no
+ * getTokenLargestAccounts, so every token account seen in a transaction that touches
+ * the mint (curve trades, pool swaps, locks, checked transfers) is collected, and
+ * their live balances are read. Programs' accounts are labelled, not counted. */
+export async function loadHolders(conn: Connection, mint: PublicKey, curveTokens: PublicKey, lockerId: PublicKey, limit = 1000): Promise<Holder[]> {
+  const m = mint.toBase58()
+  const sigs = (await conn.getSignaturesForAddress(mint, { limit })).filter(s => !s.err)
+  const accounts = new Set<string>()
+  for (let i = 0; i < sigs.length; i += 10) {
+    const txs = await Promise.all(sigs.slice(i, i + 10).map(s => conn.getTransaction(s.signature, { maxSupportedTransactionVersion: 0, commitment: 'confirmed' }).catch(() => null)))
+    for (const tx of txs) {
+      if (!tx?.meta) continue
+      const keys = tx.transaction.message.getAccountKeys({ accountKeysFromLookups: tx.meta.loadedAddresses })
+      for (const b of [...(tx.meta.preTokenBalances ?? []), ...(tx.meta.postTokenBalances ?? [])]) {
+        const k = b.mint === m ? keys.get(b.accountIndex) : undefined
+        if (k) accounts.add(k.toBase58())
+      }
+    }
+  }
+  const list = [...accounts].map(a => new PublicKey(a))
+  const rows: { acct: PublicKey; owner: PublicKey; amount: bigint }[] = []
+  for (let i = 0; i < list.length; i += 100) {
+    const infos = await conn.getMultipleParsedAccounts(list.slice(i, i + 100))
+    infos.value.forEach((x, j) => {
+      const info = (x?.data as any)?.parsed?.info
+      if (!info || info.mint !== m) return
+      const amount = BigInt(info.tokenAmount.amount)
+      if (amount > 0n) rows.push({ acct: list[i + j], owner: new PublicKey(info.owner), amount })
+    })
+  }
+  // Off-curve owners are programs: a lock (owned by the locker) or a pool's authority.
+  const offCurve = [...new Set(rows.filter(r => !PublicKey.isOnCurve(r.owner.toBytes())).map(r => r.owner.toBase58()))]
+  const ownerInfos = offCurve.length ? await conn.getMultipleAccountsInfo(offCurve.map(o => new PublicKey(o))) : []
+  const lockOwners = new Set(offCurve.filter((_, i) => ownerInfos[i]?.owner.equals(lockerId)))
+  const by = new Map<string, Holder>()
+  for (const r of rows) {
+    const o = r.owner.toBase58()
+    const kind: Holder['kind'] = r.acct.equals(curveTokens) ? 'curve' : lockOwners.has(o) ? 'lock' : !PublicKey.isOnCurve(r.owner.toBytes()) ? 'pool' : 'wallet'
+    const key = kind === 'lock' ? 'lock' : kind === 'curve' ? 'curve' : o
+    const h = by.get(key) ?? { owner: kind === 'lock' ? 'Token locks' : o, amount: 0n, kind }
+    h.amount += r.amount
+    by.set(key, h)
+  }
+  return [...by.values()].sort((a, b) => (a.amount === b.amount ? 0 : a.amount > b.amount ? -1 : 1))
 }
