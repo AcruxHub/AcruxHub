@@ -58,7 +58,36 @@ function action(text: string, route: string, privateChat: boolean) {
 }
 
 // ---------------------------------------------------------------- chain data
-type Coin = { mint: string; name: string; symbol: string; uri: string; price: number; mcap: number; progress: number; raised: number; target: number; quote: string; graduated: boolean; complete: boolean }
+// ACRUX in US dollars: Jupiter's price API, DexScreener as the fallback (same as /api/price).
+const ACRUX_SOLANA = '7Evw4uxTxLGGEFEvXLUNYyc1J7PnFk9EYwTUFagARUX'
+let usdCache: { at: number; p: number | null } | null = null
+async function acruxUsd(): Promise<number | null> {
+  if (usdCache && Date.now() - usdCache.at < 60_000) return usdCache.p
+  let p: number | null = null
+  try {
+    const j: any = await (await fetch('https://lite-api.jup.ag/price/v3?ids=' + ACRUX_SOLANA, { signal: AbortSignal.timeout(4000) })).json()
+    p = Number(j?.[ACRUX_SOLANA]?.usdPrice) > 0 ? Number(j[ACRUX_SOLANA].usdPrice) : null
+  } catch { /* fall back */ }
+  if (!p) {
+    try {
+      const pairs: any[] = await (await fetch('https://api.dexscreener.com/tokens/v1/solana/' + ACRUX_SOLANA, { signal: AbortSignal.timeout(4000) })).json()
+      const best = pairs
+        .filter(x => x?.baseToken?.address === ACRUX_SOLANA && Number(x?.priceUsd) > 0)
+        .sort((a, b) => Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0))[0]
+      p = best ? Number(best.priceUsd) : null
+    } catch { /* no price */ }
+  }
+  usdCache = { at: Date.now(), p: p ?? usdCache?.p ?? null }
+  return usdCache.p
+}
+/** Dollars, short: $1.23M, $555.2K, $12.34, $0.000809. */
+const usd = (n: number) => (n >= 1e9 ? '$' + (n / 1e9).toFixed(2) + 'B'
+  : n >= 1e6 ? '$' + (n / 1e6).toFixed(2) + 'M'
+  : n >= 1e3 ? '$' + (n / 1e3).toFixed(1) + 'K'
+  : n >= 1 ? '$' + n.toFixed(2)
+  : '$' + n.toPrecision(3))
+
+type Coin = { usdRate?: number | null; mint: string; name: string; symbol: string; uri: string; price: number; mcap: number; progress: number; raised: number; target: number; quote: string; graduated: boolean; complete: boolean }
 
 // Plain JSON-RPC and a hand decoder: Solana's JS libraries don't load in Vercel's
 // function runtime (rpc-websockets requires an ESM-only uuid), and this only reads.
@@ -107,7 +136,7 @@ async function coins(): Promise<Coin[]> {
   const uniq = [...new Set(qMints)]
   const decs = new Map<string, number>()
   ;(await many(uniq)).forEach((a, i) => decs.set(uniq[i], a ? Buffer.from(a.data[0], 'base64')[44] : 6))
-  const out = launches.map((l, i) => {
+  const out: Coin[] = launches.map((l, i) => {
     const qd = decs.get(qMints[i]) ?? 6
     const vq = Number(l.virtualQuote) / 10 ** qd, vt = Number(l.virtualTokens) / 1e6
     const price = vt > 0 ? vq / vt : 0
@@ -144,6 +173,8 @@ async function coins(): Promise<Coin[]> {
     const [tok, quote] = m.tokenIsA ? [va, vbb] : [vbb, va]
     if (tok > 0) { grads[i].price = quote / tok; grads[i].mcap = grads[i].price * supplies[i] }
   })
+  const rate = await acruxUsd()
+  for (const c of real) c.usdRate = c.quote === 'ACRUX' ? rate : null
   cache = { at: Date.now(), coins: real }
   return real
 }
@@ -173,8 +204,8 @@ function coinCard(c: Coin, privateChat: boolean) {
     `<b>${esc(c.name)}</b> $${esc(c.symbol)}`,
     `<code>${c.mint}</code>`,
     '',
-    `Price  ${fmtPrice(c.price)} ${c.quote}`,
-    `MC     ${compact(c.mcap)} ${c.quote}`,
+    c.usdRate ? `Price  ${fmtPrice(c.price)} ${c.quote} (≈ ${usd(c.price * c.usdRate)})` : `Price  ${fmtPrice(c.price)} ${c.quote}`,
+    c.usdRate ? `MC     <b>${usd(c.mcap * c.usdRate)}</b> (${compact(c.mcap)} ${c.quote})` : `MC     ${compact(c.mcap)} ${c.quote}`,
     c.graduated ? status : `Curve  ${status}\nRaised ${c.raised.toFixed(2)} / ${c.target} ${c.quote}`,
   ].join('\n')
   // Graduated coins trade on Swap (best pool); coins on the curve trade on their page.
@@ -243,7 +274,7 @@ async function linkEndpoint(req: VercelRequest, res: VercelResponse) {
 }
 
 type Bal = { mint: string; label: string; amount: number; value: number | null }
-async function balances(address: string): Promise<{ native: number; tokens: Bal[]; total: number }> {
+async function balances(address: string): Promise<{ native: number; tokens: Bal[]; total: number; rate: number | null }> {
   const [lamports, accts, all] = await Promise.all([
     rpc<any>('getBalance', [address]).then(r => Number(r?.value ?? r)),
     rpc<any>('getTokenAccountsByOwner', [address, { programId: TOKEN_PROGRAM }, { encoding: 'jsonParsed' }]).then(r => (r?.value ?? []) as any[]).catch(() => [] as any[]),
@@ -261,7 +292,7 @@ async function balances(address: string): Promise<{ native: number; tokens: Bal[
     return { mint, label: c ? '$' + c.symbol : `${mint.slice(0, 4)}…${mint.slice(-4)}`, amount, value: c && c.quote === 'ACRUX' ? amount * c.price : null }
   }).sort((a, b) => (b.value ?? -1) - (a.value ?? -1))
   const native = lamports / 1e9
-  return { native, tokens, total: native + tokens.reduce((s, t) => s + (t.value ?? 0), 0) }
+  return { native, tokens, total: native + tokens.reduce((s, t) => s + (t.value ?? 0), 0), rate: await acruxUsd() }
 }
 
 async function walletCard(address: string, mine: boolean, privateChat: boolean) {
@@ -271,7 +302,7 @@ async function walletCard(address: string, mine: boolean, privateChat: boolean) 
     `💼 <b>${mine ? 'Your wallet' : 'Wallet'}</b>`,
     `<code>${address}</code>`,
     '',
-    `<b>≈ ${n(b.total)} ACRUX</b> total`,
+    b.rate ? `<b>≈ ${usd(b.total * b.rate)}</b> total (${n(b.total)} ACRUX)` : `<b>≈ ${n(b.total)} ACRUX</b> total`,
     '',
     `ACRUX  ${n(b.native)}`,
     ...b.tokens.slice(0, 15).map(t => `${esc(t.label)}  ${n(t.amount)}${t.value != null && t.mint !== WRAPPED_ACRUX ? `  (≈ ${n(t.value)} ACRUX)` : ''}`),
@@ -477,7 +508,7 @@ async function onMessage(m: any) {
     const all = await coins()
     const live = all.filter(c => !c.graduated && !c.complete).sort((a, b) => b.progress - a.progress).slice(0, 5)
     const grads = all.filter(c => c.graduated).sort((a, b) => b.mcap - a.mcap).slice(0, 5)
-    const line = (c: Coin) => `• <b>$${esc(c.symbol)}</b> ${fmtPrice(c.price)} ${c.quote} · MC ${compact(c.mcap)}${c.graduated ? '' : ` · ${(c.progress * 100).toFixed(0)}%`}`
+    const line = (c: Coin) => `• <b>$${esc(c.symbol)}</b> ${fmtPrice(c.price)} ${c.quote} · MC ${c.usdRate ? usd(c.mcap * c.usdRate) : compact(c.mcap) + ' ' + c.quote}${c.graduated ? '' : ` · ${(c.progress * 100).toFixed(0)}%`}`
     const body = [
       '<b>On the curve</b>', ...(live.length ? live.map(line) : ['none yet']),
       '', '<b>Graduated</b>', ...(grads.length ? grads.map(line) : ['none yet']),

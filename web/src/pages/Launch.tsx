@@ -7,7 +7,7 @@ import {
   type CurveState,
 } from '@acruxhub/sdk'
 import { useWallet, readProvider } from '../wallet.tsx'
-import { useAsync, tokenLabel } from '../hooks.ts'
+import { useAsync, tokenLabel, useAcruxUsd, usd } from '../hooks.ts'
 import { loadLaunchConfig, decimalsOf } from '../data.ts'
 import { fmt, parseAmount, short, LAUNCHES_PAUSED, KNOWN_TOKENS } from '../net.ts'
 import { Action, CopyButton, Price } from '../ui.tsx'
@@ -254,6 +254,14 @@ function mcapOf(s: CurveState, qd: number, totalSupply: bigint) {
   return priceOf(s, qd) * (Number(totalSupply) / 10 ** TOKEN_DECIMALS)
 }
 
+/** Market cap: in dollars (with the ACRUX figure beside it) for coins that trade in
+ * ACRUX once ACRUX's dollar price is known; in the quote token otherwise. */
+function Mcap({ mcap, quoteSym }: { mcap: number; quoteSym: string }) {
+  const rate = useAcruxUsd()
+  if (rate && quoteSym === 'ACRUX') return <span>MC <span className="coin-mcap">{usd(mcap * rate)}</span> <small className="faint">{compact(mcap)} ACRUX</small></span>
+  return <span>MC <span className="coin-mcap">{compact(mcap)}</span> {quoteSym}</span>
+}
+
 function CoinCard({ l, quoteSym, qd, totalSupply, locked }: { l: LaunchRow; totalSupply: bigint; locked: bigint } & Quote) {
   const a = l.account
   const s = stateOf(a)
@@ -264,7 +272,7 @@ function CoinCard({ l, quoteSym, qd, totalSupply, locked }: { l: LaunchRow; tota
       <CoinImage meta={meta} symbol={a.symbol} size={72} />
       <div className="coin-body">
         <div className="coin-title"><strong>{a.name}</strong><span className="tick">${a.symbol}</span></div>
-        <div className="coin-meta"><span>MC <span className="coin-mcap">{compact(mk.mcap)}</span> {quoteSym}</span><span className="row" style={{ gap: 6 }}><LockTag locked={locked} totalSupply={mk.supply} /><Status a={a} s={s} /></span></div>
+        <div className="coin-meta"><Mcap mcap={mk.mcap} quoteSym={quoteSym} /><span className="row" style={{ gap: 6 }}><LockTag locked={locked} totalSupply={mk.supply} /><Status a={a} s={s} /></span></div>
         <div className={`bar${a.graduated ? ' good' : ''}`}><div style={{ width: `${a.graduated ? 100 : curveProgress(s) * 100}%` }} /></div>
         {meta?.description ? <p className="coin-desc">{meta.description}</p> : <p className="coin-desc faint">by {short(a.creator)}</p>}
       </div>
@@ -284,7 +292,7 @@ function Feature({ l, quoteSym, qd, totalSupply }: { l: LaunchRow; totalSupply: 
         <div className="eyebrow">Closest to graduating</div>
         <h2>{a.name} <span className="muted" style={{ fontSize: 14 }}>${a.symbol}</span></h2>
         <div className="coin-meta" style={{ justifyContent: 'flex-start', gap: 16, marginBottom: 8 }}>
-          <span>MC <span className="coin-mcap">{compact(mcapOf(s, qd, totalSupply))}</span> {quoteSym}</span>
+          <Mcap mcap={mcapOf(s, qd, totalSupply)} quoteSym={quoteSym} />
           <span><span className="num">{fmt(s.realQuote, qd, 2)}</span> / <span className="num">{fmt(s.graduationQuote, qd, 0)}</span> {quoteSym} raised</span>
         </div>
         <div className="bar" style={{ maxWidth: 420 }}><div style={{ width: `${p * 100}%` }} /></div>
@@ -313,6 +321,7 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
   const curveBal = useAsync(async () => BigInt((await w.conn.getTokenAccountBalance(a.curveTokens)).value.amount), [w.conn, a.curveTokens.toBase58(), w.refreshKey])
   const [tab, setTab] = useState<'trades' | 'holders' | 'about'>('trades')
   const mk = useMarket(l, qd, totalSupply)
+  const usdRate = useAcruxUsd() // ACRUX in dollars, for coins that trade in ACRUX
   const locked = useLocked(a.mint)
   const lockedPct = locked.data && mk.supply > 0n ? (Number(locked.data.total) / Number(mk.supply)) * 100 : 0
 
@@ -351,8 +360,8 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
           </div>
 
           <div className="stats">
-            <div><span className="label">Market cap</span><span className="value">{compact(mk.mcap)} <small>{quoteSym}</small></span></div>
-            <div><span className="label">Price</span><span className="value"><Price text={fmtPrice(now)} /></span></div>
+            <div><span className="label">Market cap</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(mk.mcap * usdRate)} <small>{compact(mk.mcap)} ACRUX</small></> : <>{compact(mk.mcap)} <small>{quoteSym}</small></>}</span></div>
+            <div><span className="label">Price</span><span className="value"><Price text={fmtPrice(now)} />{usdRate && quoteSym === 'ACRUX' && <small> ≈ {usd(now * usdRate)}</small>}</span></div>
             <div><span className="label">Change</span><span className={`value ${change >= 0 ? 'up' : 'down'}`}>{pts.length ? `${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '–'}</span></div>
             <div><span className="label">Trades</span><span className="value">{trades.data ? trades.data.length : '…'}</span></div>
           </div>
