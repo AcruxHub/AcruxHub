@@ -324,6 +324,8 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
   const usdRate = useAcruxUsd() // ACRUX in dollars, for coins that trade in ACRUX
   const locked = useLocked(a.mint)
   const lockedPct = locked.data && mk.supply > 0n ? (Number(locked.data.total) / Number(mk.supply)) * 100 : 0
+  // Market cap of what isn't locked (only shown when something is locked).
+  const unlockedMcap = lockedPct > 0 ? mk.mcap * (1 - lockedPct / 100) : null
 
   const pts = useMemo(() => {
     const ts = trades.data ?? []
@@ -368,8 +370,11 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
             </div>
           </div>
 
-          <div className="stats">
+          <div className={`stats${unlockedMcap != null ? ' stats-5' : ''}`}>
             <div><span className="label">Market cap</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(mk.mcap * usdRate)}<small className="stat-sub">{compact(mk.mcap)} ACRUX</small></> : <>{compact(mk.mcap)} <small>{quoteSym}</small></>}</span></div>
+            {unlockedMcap != null && (
+              <div><span className="label" title="Market cap of the supply that isn't in a token lock: what can actually trade today">Unlocked MC</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(unlockedMcap * usdRate)}<small className="stat-sub">{compact(unlockedMcap)} ACRUX</small></> : <>{compact(unlockedMcap)} <small>{quoteSym}</small></>}</span></div>
+            )}
             <div><span className="label">Price</span><span className="value"><Price text={fmtPrice(now)} />{usdRate && quoteSym === 'ACRUX' && <small className="stat-sub">≈ {usd(now * usdRate)}</small>}</span></div>
             <div><span className="label" title={dayAgo ? 'Change over the last 24 hours' : 'Under a day old: shows once it has 24 hours of trading'}>24h</span><span className={`value ${change >= 0 ? 'up' : 'down'}`}>{dayAgo ?`${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '–'}</span></div>
             <div><span className="label">Trades</span><span className="value">{trades.data ? trades.data.length : '…'}</span></div>
