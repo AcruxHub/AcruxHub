@@ -360,8 +360,8 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
           </div>
 
           <div className="stats">
-            <div><span className="label">Market cap</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(mk.mcap * usdRate)} <small>{compact(mk.mcap)} ACRUX</small></> : <>{compact(mk.mcap)} <small>{quoteSym}</small></>}</span></div>
-            <div><span className="label">Price</span><span className="value"><Price text={fmtPrice(now)} />{usdRate && quoteSym === 'ACRUX' && <small> ≈ {usd(now * usdRate)}</small>}</span></div>
+            <div><span className="label">Market cap</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(mk.mcap * usdRate)}<small className="stat-sub">{compact(mk.mcap)} ACRUX</small></> : <>{compact(mk.mcap)} <small>{quoteSym}</small></>}</span></div>
+            <div><span className="label">Price</span><span className="value"><Price text={fmtPrice(now)} />{usdRate && quoteSym === 'ACRUX' && <small className="stat-sub">≈ {usd(now * usdRate)}</small>}</span></div>
             <div><span className="label">Change</span><span className={`value ${change >= 0 ? 'up' : 'down'}`}>{pts.length ? `${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '–'}</span></div>
             <div><span className="label">Trades</span><span className="value">{trades.data ? trades.data.length : '…'}</span></div>
           </div>

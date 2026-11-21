@@ -367,3 +367,6 @@ sub.zeros { font-size: .72em; vertical-align: -.25em; margin: 0 1px; color: var(
 .hub-ca .mono { color: var(--text); }
 .hub-buy { margin-left: auto; font-weight: 600; white-space: nowrap; }
 @media (max-width: 640px) { .hub-bar { gap: 8px; padding: 8px 10px; } .hub-ca { flex-basis: 100%; order: 3; font-size: 12px; white-space: normal; word-break: break-all; overflow: visible; } }
+
+/* A second, smaller line under a stat (the ACRUX figure under a dollar market cap). */
+.stats .stat-sub { display: block; font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
