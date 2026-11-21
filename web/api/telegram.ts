@@ -193,6 +193,8 @@ const BRIDGE_HELP = [
   'Bridge ACRUX from Solana to Acrux right here, 1:1, usually under a minute.',
   '',
   'Your bot wallet has the same address on Solana and Acrux. Send your ACRUX plus about 0.01 SOL to that address on Solana (from Phantom or an exchange), then tap Bridge. Or import your Phantom wallet\'s key and bridge straight from it.',
+  '',
+  'Going back? Open the bridge and switch to Acrux → Solana: it\'s paid out on Solana, usually in about a minute.',
 ].join('\n')
 
 /** One-tap buy sizes, in ACRUX. */

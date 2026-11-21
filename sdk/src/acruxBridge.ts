@@ -58,3 +58,50 @@ export function acruxBridgeDeposit(a: { depositor: PublicKey; recipient: PublicK
     data: Buffer.from(data),
   })
 }
+
+// ---- The way back: Acrux -> Solana (withdraw_native, on Acrux) ----
+// Burns native ACRUX on Acrux and records a Withdrawal; Acrux's relayer proves it to
+// Solana and `release` pays the recipient's ACRUX token account from the vault, usually
+// in about a minute. The recipient's ACRUX token account on Solana must exist for the
+// payout to land. Layout from https://acrux.computer/docs/reference/bridge-program.
+const WITHDRAW_NATIVE_DISC = Uint8Array.from([0x71, 0xe3, 0x1a, 0x20, 0x35, 0x42, 0x5a, 0xfa])
+const OUTBOUND_DISC = '25f20b6bf29c4681'
+/** Smallest withdrawal Acrux's bridge accepts: 1 ACRUX (the "minimum" account). */
+export const ACRUX_MIN_WITHDRAWAL = 1_000_000n
+
+export const acruxBridgeOutbound = () => pda(seed('outbound'))
+export const acruxBridgeWithdrawalRecord = (sequence: bigint) => pda(seed('withdrawal'), u64(sequence))
+
+/** The next withdrawal's sequence (Outbound.withdrawals, on Acrux). */
+export async function acruxBridgeNextWithdrawal(acrux: Connection): Promise<bigint> {
+  const info = await acrux.getAccountInfo(acruxBridgeOutbound(), 'confirmed')
+  if (!info) return 0n // the first withdrawal creates it
+  if (!info.owner.equals(ACRUX_BRIDGE_ID)) throw new Error('unexpected outbound account')
+  const d = info.data as Uint8Array
+  if (Array.from(d.subarray(0, 8), b => b.toString(16).padStart(2, '0')).join('') !== OUTBOUND_DISC) throw new Error('unexpected outbound account')
+  return new DataView(d.buffer, d.byteOffset).getBigUint64(8, true)
+}
+
+/** Bridge `amount` ACRUX (Solana base units, 6 decimals) from Acrux back to `recipient` on Solana.
+ * Costs `amount` x 1,000 lamports of native ACRUX, plus the fee and the record's rent. */
+export function acruxBridgeWithdrawNative(a: { owner: PublicKey; recipient: PublicKey; amount: bigint; sequence: bigint; mint?: PublicKey }) {
+  const mint = a.mint ?? ACRUX_SOLANA_MINT
+  const data = new Uint8Array(8 + 8 + 32)
+  data.set(WITHDRAW_NATIVE_DISC, 0)
+  data.set(u64(a.amount), 8)
+  data.set(a.recipient.toBytes(), 16)
+  const m = (pubkey: PublicKey, isWritable = false, isSigner = false) => ({ pubkey, isWritable, isSigner })
+  return new TransactionInstruction({
+    programId: ACRUX_BRIDGE_ID,
+    keys: [
+      m(a.owner, true, true),
+      m(pda(seed('native')), true),
+      m(pda(seed('minimum'), mint.toBytes())),
+      m(pda(seed('native_burn')), true),
+      m(acruxBridgeOutbound(), true),
+      m(acruxBridgeWithdrawalRecord(a.sequence), true),
+      m(SystemProgram.programId),
+    ],
+    data: Buffer.from(data),
+  })
+}
