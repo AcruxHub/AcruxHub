@@ -250,6 +250,12 @@ function useMarket(l: LaunchRow, qd: number, totalSupply: bigint) {
   return { price, supply, mcap: price * (Number(supply) / 10 ** TOKEN_DECIMALS), live: !!pool.data }
 }
 
+/** Market cap of the supply outside token locks (circulating), the figure the cards show. */
+function unlockedShare(mcap: number, locked: bigint, supply: bigint) {
+  if (locked <= 0n || supply <= 0n || locked > supply) return mcap
+  return mcap * (Number(supply - locked) / Number(supply))
+}
+
 function mcapOf(s: CurveState, qd: number, totalSupply: bigint) {
   return priceOf(s, qd) * (Number(totalSupply) / 10 ** TOKEN_DECIMALS)
 }
@@ -272,7 +278,7 @@ function CoinCard({ l, quoteSym, qd, totalSupply, locked }: { l: LaunchRow; tota
       <CoinImage meta={meta} symbol={a.symbol} size={72} />
       <div className="coin-body">
         <div className="coin-title"><strong>{a.name}</strong><span className="tick">${a.symbol}</span></div>
-        <div className="coin-meta"><Mcap mcap={mk.mcap} quoteSym={quoteSym} /><span className="row" style={{ gap: 6 }}><LockTag locked={locked} totalSupply={mk.supply} /><Status a={a} s={s} /></span></div>
+        <div className="coin-meta"><Mcap mcap={unlockedShare(mk.mcap, locked, mk.supply)} quoteSym={quoteSym} /><span className="row" style={{ gap: 6 }}><LockTag locked={locked} totalSupply={mk.supply} /><Status a={a} s={s} /></span></div>
         <div className={`bar${a.graduated ? ' good' : ''}`}><div style={{ width: `${a.graduated ? 100 : curveProgress(s) * 100}%` }} /></div>
         {meta?.description ? <p className="coin-desc">{meta.description}</p> : <p className="coin-desc faint">by {short(a.creator)}</p>}
       </div>
@@ -371,9 +377,11 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
           </div>
 
           <div className={`stats${unlockedMcap != null ? ' stats-5' : ''}`}>
-            <div><span className="label">Market cap</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(mk.mcap * usdRate)}<small className="stat-sub">{compact(mk.mcap)} ACRUX</small></> : <>{compact(mk.mcap)} <small>{quoteSym}</small></>}</span></div>
+            {/* Market cap counts only what isn't in a token lock (circulating), as CoinGecko and
+                DexScreener do; the whole supply at the same price is the FDV beside it. */}
+            <div><span className="label" title={unlockedMcap != null ? 'Price × the supply that is not in a token lock (what can trade today)' : 'Price × supply'}>Market cap</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd((unlockedMcap ?? mk.mcap) * usdRate)}<small className="stat-sub">{compact(unlockedMcap ?? mk.mcap)} ACRUX</small></> : <>{compact(unlockedMcap ?? mk.mcap)} <small>{quoteSym}</small></>}</span></div>
             {unlockedMcap != null && (
-              <div><span className="label" title="Market cap of the supply that isn't in a token lock: what can actually trade today">Unlocked MC</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(unlockedMcap * usdRate)}<small className="stat-sub">{compact(unlockedMcap)} ACRUX</small></> : <>{compact(unlockedMcap)} <small>{quoteSym}</small></>}</span></div>
+              <div><span className="label" title="Fully diluted value: price × the whole supply, locked tokens included">FDV</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(mk.mcap * usdRate)}<small className="stat-sub">{compact(mk.mcap)} ACRUX</small></> : <>{compact(mk.mcap)} <small>{quoteSym}</small></>}</span></div>
             )}
             <div><span className="label">Price</span><span className="value"><Price text={fmtPrice(now)} />{usdRate && quoteSym === 'ACRUX' && <small className="stat-sub">≈ {usd(now * usdRate)}</small>}</span></div>
             <div><span className="label" title={dayAgo ? 'Change over the last 24 hours' : 'Under a day old: shows once it has 24 hours of trading'}>24h</span><span className={`value ${change >= 0 ? 'up' : 'down'}`}>{dayAgo ?`${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '–'}</span></div>

@@ -36,6 +36,9 @@ const HUB = 'AuVCwgJQRQP1EA655JLDP86uD7r6qEcQZRti4Htp5Uvp'
 const LINKS = { x: 'https://x.com/AcruxHub', site: SITE, tg: 'https://t.me/AcruxHubPortal', github: 'https://github.com/AcruxHub/AcruxHub', docs: `${SITE}/#Docs` }
 // Launch account discriminator (sdk/src/idl/acruxhub_launchpad.json).
 const LAUNCH_DISC = Buffer.from([144, 51, 51, 163, 206, 85, 213, 38])
+// Token locks (programs/locker): TokenLock = disc, owner, mint (40), id, amount (u64 at 80), ...
+const LOCKER = '12Bt6QsAA2Xh2Zo6fzUoeuYqsstpvPfZSeUbt3mwMBzh'
+const LOCK_DISC = Buffer.from([73, 228, 144, 241, 154, 44, 93, 238])
 
 // ---------------------------------------------------------------- Telegram API
 async function tg(method: string, body: Record<string, unknown>) {
@@ -89,7 +92,7 @@ const usd = (n: number) => (n >= 1e9 ? '$' + (n / 1e9).toFixed(2) + 'B'
   : n >= 1 ? '$' + n.toFixed(2)
   : '$' + n.toPrecision(3))
 
-type Coin = { usdRate?: number | null; mint: string; name: string; symbol: string; uri: string; price: number; mcap: number; progress: number; raised: number; target: number; quote: string; graduated: boolean; complete: boolean }
+type Coin = { usdRate?: number | null; mint: string; name: string; symbol: string; uri: string; price: number; mcap: number; fdv: number; progress: number; raised: number; target: number; quote: string; graduated: boolean; complete: boolean }
 
 // Plain JSON-RPC and a hand decoder: Solana's JS libraries don't load in Vercel's
 // function runtime (rpc-websockets requires an ESM-only uuid), and this only reads.
@@ -144,7 +147,7 @@ async function coins(): Promise<Coin[]> {
     const price = vt > 0 ? vq / vt : 0
     const target = Number(l.graduationQuote) / 10 ** qd, raised = Number(l.realQuote) / 10 ** qd
     return {
-      mint: l.mint, name: l.name, symbol: l.symbol, uri: l.uri, price, mcap: price * 1e9,
+      mint: l.mint, name: l.name, symbol: l.symbol, uri: l.uri, price, mcap: price * 1e9, fdv: price * 1e9,
       progress: target > 0 ? Math.min(1, raised / target) : 0, raised, target,
       quote: qMints[i] === WRAPPED_ACRUX ? 'ACRUX' : qMints[i] === AXB ? 'AXB' : qMints[i].slice(0, 4),
       graduated: l.graduated, complete: l.complete,
@@ -173,12 +176,33 @@ async function coins(): Promise<Coin[]> {
     if (!m) return
     const va = amt(vb[vaults.indexOf(m.a)]) / 10 ** m.decA, vbb = amt(vb[vaults.indexOf(m.b)]) / 10 ** m.decB
     const [tok, quote] = m.tokenIsA ? [va, vbb] : [vbb, va]
-    if (tok > 0) { grads[i].price = quote / tok; grads[i].mcap = grads[i].price * supplies[i] }
+    if (tok > 0) { grads[i].price = quote / tok; grads[i].mcap = grads[i].fdv = grads[i].price * supplies[i] }
   })
+  // Market cap counts only the supply outside token locks (circulating), as CoinGecko and
+  // DexScreener do; the whole supply at the same price is the FDV.
+  const locked = await lockedByMint().catch(() => new Map<string, number>())
+  for (const c of real) {
+    const supply = c.price > 0 ? c.fdv / c.price : 0
+    const l = Math.min(locked.get(c.mint) ?? 0, supply)
+    if (l > 0) c.mcap = c.price * (supply - l)
+  }
   const rate = await acruxUsd()
   for (const c of real) c.usdRate = c.quote === 'ACRUX' ? rate : null
   cache = { at: Date.now(), coins: real }
   return real
+}
+
+/** Tokens (whole units, 6 decimals) in token locks, per mint. */
+async function lockedByMint() {
+  const raw = await rpc<any[]>('getProgramAccounts', [LOCKER, { encoding: 'base64' }])
+  const out = new Map<string, number>()
+  for (const r of raw) {
+    const d = Buffer.from(r.account.data[0], 'base64')
+    if (d.length < 88 || !d.subarray(0, 8).equals(LOCK_DISC)) continue
+    const mint = b58(d.subarray(40, 72))
+    out.set(mint, (out.get(mint) ?? 0) + Number(d.readBigUInt64LE(80)) / 1e6)
+  }
+  return out
 }
 
 function fmtPrice(p: number) {
@@ -210,6 +234,7 @@ function coinCard(c: Coin, privateChat: boolean) {
     '',
     c.usdRate ? `Price  ${fmtPrice(c.price)} ${c.quote} (≈ ${usd(c.price * c.usdRate)})` : `Price  ${fmtPrice(c.price)} ${c.quote}`,
     c.usdRate ? `MC     <b>${usd(c.mcap * c.usdRate)}</b> (${compact(c.mcap)} ${c.quote})` : `MC     ${compact(c.mcap)} ${c.quote}`,
+    ...(c.fdv > c.mcap * 1.001 ? [c.usdRate ? `FDV    ${usd(c.fdv * c.usdRate)} (incl. locked tokens)` : `FDV    ${compact(c.fdv)} ${c.quote} (incl. locked tokens)`] : []),
     c.graduated ? status : `Curve  ${status}\nRaised ${c.raised.toFixed(2)} / ${c.target} ${c.quote}`,
   ].join('\n')
   // Graduated coins trade on Swap (best pool); coins on the curve trade on their page.
