@@ -72,11 +72,17 @@ async function findPool(): Promise<CpmmPool & { r0: bigint; r1: bigint; cfg: any
   return withRes.sort((a, b) => Number((a.mintA.equals(QUOTE) ? b.r0 - a.r0 : b.r1 - a.r1)))[0]
 }
 
-async function run(label: string, ixs: TransactionInstruction[]) {
+// Optional: a second wallet (FEE_PAYER_KEY) that pays the network fee when this wallet
+// has no native ACRUX yet, so a fresh fee wallet can unwrap its first gas by itself.
+const feePayer = process.env.FEE_PAYER_KEY
+  ? Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(process.env.FEE_PAYER_KEY, 'utf8'))))
+  : null
+
+async function run(label: string, ixs: TransactionInstruction[], payer: Keypair = kp) {
   const tx = new Transaction().add(...ixs)
-  tx.feePayer = me
+  tx.feePayer = payer.publicKey
   tx.recentBlockhash = (await conn.getLatestBlockhash('confirmed')).blockhash
-  tx.sign(kp)
+  tx.sign(...(payer.publicKey.equals(me) ? [kp] : [payer, kp]))
   const sim = await conn.simulateTransaction(tx)
   if (sim.value.err) throw new Error(`${label}: simulation failed ${JSON.stringify(sim.value.err)}\n${(sim.value.logs ?? []).slice(-8).join('\n')}`)
   if (!yes) { console.log(`  ${label}: simulated OK`); return null }
@@ -116,8 +122,15 @@ if (!yes) console.log('Dry run: simulating each step. Add --yes to send.')
 const gasFloor = BigInt(Math.round(Number(flag('--gas') ?? 0.05) * 1e9))
 if (isWacrux && native < gasFloor && have > gasFloor * 4n) {
   const top = gasFloor * 2n - native
-  await run(`unwrap ${whole(top, 9)} ACRUX for gas`, [await unwrapIx(top)])
+  // With no native ACRUX at all, this wallet can't pay even the unwrap's fee: FEE_PAYER_KEY does.
+  const payer = native < 1_000_000n && feePayer ? feePayer : kp
+  await run(`unwrap ${whole(top, 9)} ACRUX for gas${payer === kp ? '' : ' (network fee paid by ' + payer.publicKey.toBase58().slice(0, 6) + '…)'}`, [await unwrapIx(top)], payer)
   have -= top
+}
+
+if (yes && BigInt(await conn.getBalance(me)) < 1_000_000n) {
+  console.log('No native ACRUX for network fees yet, and nothing to unwrap for it. Skipping this run.')
+  process.exit(0)
 }
 
 const reserve = raw(flag('--reserve') ?? '0', qDec)

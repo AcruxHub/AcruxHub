@@ -127,7 +127,7 @@ function externalLinks(open: (url: string) => void) {
 
 /** Pages the bot may open, as Route or Route_part_part (Telegram's startapp alphabet has
  * no slash): an address, new/send/receive/buy/sell, or a whole-number amount. */
-const START = /^(Launch|Swap|Pools|Bridge|Explorer|Portfolio|Docs|Wallet|Locks)(_([1-9A-HJ-NP-Za-km-z]{32,44}|new|send|receive|buy|sell|\d{1,12}))*$/
+const START = /^(Launch|Swap|Pools|Bridge|Explorer|Portfolio|Docs|Wallet|Locks)(_([1-9A-HJ-NP-Za-km-z]{32,44}|new|send|receive|buy|sell|native|\d{1,12}(p\d{1,9})?))*$/
 
 async function initTelegram() {
   document.documentElement.classList.add('telegram')

@@ -20,7 +20,8 @@ type Row = { id: string; mint: string | null; label: string; amount: bigint; dec
 export function Wallet() {
   const w = useWallet()
   // #Wallet/send/<mint> opens Send with that token picked.
-  const [, mode, preset] = location.hash.slice(1).split('/')
+  // #Wallet/send/<token or native>/<to>/<amount> opens Send filled in (amount may use p for the decimal point).
+  const [, mode, preset, presetTo, presetAmt] = location.hash.slice(1).split('/')
   const data = useAsync(async () => {
     if (!w.publicKey) return null
     const [lamports, toks, pools, symbols, prices, hidden] = await Promise.all([
@@ -96,7 +97,7 @@ export function Wallet() {
         </div>
       )}
 
-      {sending && <Send key={sending.id} rows={rows} row={sending} onPick={setSendId} onDone={() => w.bump()} />}
+      {sending && <Send key={sending.id} rows={rows} row={sending} onPick={setSendId} onDone={() => w.bump()} initialTo={presetTo ?? ''} initialAmt={(presetAmt ?? '').replace('p', '.')} />}
 
       <div className="card">
         <h2>Balances</h2>
@@ -132,10 +133,10 @@ export function Wallet() {
   )
 }
 
-function Send({ rows, row, onPick, onDone }: { rows: Row[]; row: Row; onPick: (id: string) => void; onDone: () => void }) {
+function Send({ rows, row, onPick, onDone, initialTo = '', initialAmt = '' }: { rows: Row[]; row: Row; onPick: (id: string) => void; onDone: () => void; initialTo?: string; initialAmt?: string }) {
   const w = useWallet()
-  const [to, setTo] = useState('')
-  const [amt, setAmt] = useState('')
+  const [to, setTo] = useState(initialTo)
+  const [amt, setAmt] = useState(/^\d+(\.\d+)?$/.test(initialAmt) ? initialAmt : '')
   const dest = useMemo(() => { try { return to.trim() ? new PublicKey(to.trim()) : null } catch { return null } }, [to])
   const native = row.id === NATIVE
   const max = native ? (row.amount > FEE_RESERVE ? row.amount - FEE_RESERVE : 0n) : row.amount
