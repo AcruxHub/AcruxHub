@@ -72,9 +72,11 @@ export async function deployed(conn: Connection) {
 const symbolCache = new Map<string, string>()
 /** Our wrapped ACRUX shows as plain ACRUX: it is 1:1 and the site wraps for you. */
 export const WACRUX = wacruxMint().toBase58()
+/** SPL Token's standard wrapped-native mint: on Acrux it wraps ACRUX 1:1 (from slot 6,480,000). */
+export const NATIVE_ACRUX = 'So11111111111111111111111111111111111111112'
 
 export function tokenLabel(mint: string, extra?: Record<string, string>) {
-  if (mint === WACRUX) return 'ACRUX'
+  if (mint === WACRUX || mint === NATIVE_ACRUX) return 'ACRUX'
   return KNOWN_TOKENS[mint]?.symbol ?? extra?.[mint] ?? symbolCache.get(mint) ?? `${mint.slice(0, 4)}…${mint.slice(-4)}`
 }
 export function rememberSymbol(mint: string, symbol: string) {

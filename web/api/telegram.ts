@@ -22,6 +22,8 @@ const SITE = 'https://acruxhub.com'
 const RPC = 'https://rpc.acrux.computer'
 // Our wrapped ACRUX (programs/wacrux): coins are priced in it, shown as ACRUX.
 const WRAPPED_ACRUX = '8wkvan326WoFWuQzpezYqjiyR93KZAWJdA9GNqxkMxxT'
+// SPL Token's standard wrapped-native mint: ACRUX 1:1 on Acrux from slot 6,480,000.
+const NATIVE_ACRUX = 'So11111111111111111111111111111111111111112'
 // Pre-switch demo tokens (worth nothing): coins priced in them are left out.
 const DEMO = new Set(['28TKYtoixNcHeNRuJ4C69tYP4yEXDGA6wBE4crB1j3Td', '713QqmE1xGXS8vACKxfxyr5YvtitXymtiR45E3egsdss'])
 // Launched by us, never traded, replaced by a later launch.
@@ -289,7 +291,7 @@ async function balances(address: string): Promise<{ native: number; tokens: Bal[
     sums.set(i.mint, (sums.get(i.mint) ?? 0) + Number(i.tokenAmount.uiAmountString ?? i.tokenAmount.uiAmount ?? 0))
   }
   const tokens: Bal[] = [...sums.entries()].filter(([m, v]) => v > 0 && !DEMO.has(m) && !hiddenCoins.has(m)).map(([mint, amount]) => {
-    if (mint === WRAPPED_ACRUX) return { mint, label: 'Wrapped ACRUX', amount, value: amount }
+    if (mint === WRAPPED_ACRUX || mint === NATIVE_ACRUX) return { mint, label: 'Wrapped ACRUX', amount, value: amount }
     const c = byMint.get(mint)
     return { mint, label: c ? '$' + c.symbol : `${mint.slice(0, 4)}…${mint.slice(-4)}`, amount, value: c && c.quote === 'ACRUX' ? amount * c.price : null }
   }).sort((a, b) => (b.value ?? -1) - (a.value ?? -1))
@@ -307,7 +309,7 @@ async function walletCard(address: string, mine: boolean, privateChat: boolean) 
     b.rate ? `<b>≈ ${usd(b.total * b.rate)}</b> total (${n(b.total)} ACRUX)` : `<b>≈ ${n(b.total)} ACRUX</b> total`,
     '',
     `ACRUX  ${n(b.native)}`,
-    ...b.tokens.slice(0, 15).map(t => `${esc(t.label)}  ${n(t.amount)}${t.value != null && t.mint !== WRAPPED_ACRUX ? `  (≈ ${n(t.value)} ACRUX)` : ''}`),
+    ...b.tokens.slice(0, 15).map(t => `${esc(t.label)}  ${n(t.amount)}${t.value != null && t.mint !== WRAPPED_ACRUX && t.mint !== NATIVE_ACRUX ? `  (≈ ${n(t.value)} ACRUX)` : ''}`),
     ...(b.tokens.length > 15 ? [`…and ${b.tokens.length - 15} more`] : []),
   ]
   const kb = mine && privateChat

@@ -6,7 +6,8 @@ import { PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana
 import { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from '@solana/spl-token'
 import { wacruxProgram, unwrapInstruction } from '@acruxhub/sdk'
 import { useWallet } from '../wallet.tsx'
-import { useAsync, holdings, tokenLabel, WACRUX } from '../hooks.ts'
+import { useAsync, holdings, tokenLabel, WACRUX, NATIVE_ACRUX } from '../hooks.ts'
+import { unwrapNativeMint } from '../wrap.ts'
 import { loadPools, launchSymbols, acruxPrices, hiddenMints } from '../data.ts'
 import { fmt, parseAmount, short } from '../net.ts'
 import { Action, CopyButton, Empty, NeedWallet } from '../ui.tsx'
@@ -63,7 +64,7 @@ export function Wallet() {
     for (const t of toks) {
       if (t.amount <= 0n || lpMints.has(t.mint)) continue
       const whole = Number(t.amount) / 10 ** t.decimals
-      const isW = t.mint === WACRUX
+      const isW = t.mint === WACRUX || t.mint === NATIVE_ACRUX
       const p = isW ? 1 : prices.get(t.mint)
       list.push({
         id: t.mint, mint: t.mint, label: isW ? 'Wrapped ACRUX' : tokenLabel(t.mint, symbols), amount: t.amount, decimals: t.decimals,
@@ -117,7 +118,7 @@ export function Wallet() {
             </div>
             <div className="wallet-row-actions">
               <button onClick={() => { setSendId(r.id); setReceive(false); scrollTo({ top: 0, behavior: 'smooth' }) }}>Send</button>
-              {r.mint && r.mint !== WACRUX && <>
+              {r.mint && r.mint !== WACRUX && r.mint !== NATIVE_ACRUX && <>
                 <button className="buy" onClick={() => { location.hash = `#Swap/${r.mint}` }}>Buy</button>
                 <button className="sell" onClick={() => { location.hash = `#Swap/${r.mint}/sell` }}>Sell</button>
                 <button onClick={() => { location.hash = `#Launch/${r.mint}` }}>Chart</button>
@@ -125,6 +126,12 @@ export function Wallet() {
               {r.mint === WACRUX && (
                 <Action primary={false} label="Unwrap" run={async () => {
                   const sig = await w.send(new Transaction().add(await unwrapInstruction(wacruxProgram(w.provider!), w.publicKey!, r.amount)))
+                  w.bump(); return `Unwrapped. ${sig}`
+                }} />
+              )}
+              {r.mint === NATIVE_ACRUX && (
+                <Action primary={false} label="Unwrap" run={async () => {
+                  const sig = await w.send(new Transaction().add(unwrapNativeMint(w.publicKey!)))
                   w.bump(); return `Unwrapped. ${sig}`
                 }} />
               )}

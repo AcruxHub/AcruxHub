@@ -153,10 +153,11 @@ export async function loadMarkets(conn: Connection): Promise<Market[]> {
   }))
   // Only real markets: at least one side is real ACRUX (wrapped), and neither side is a
   // test coin or demo token. Pools between two made-up tokens are leftover tests.
-  const acrux = wacruxMint().toBase58()
+  // ACRUX here is either wrapped form: our wACRUX or the standard native mint (So111…112).
+  const acrux = new Set([wacruxMint().toBase58(), NATIVE_ACRUX_MINT])
   return [...ours, ...ray].filter(m =>
     m.reserveA > 0n && m.reserveB > 0n &&
-    (m.mintA.toBase58() === acrux || m.mintB.toBase58() === acrux) &&
+    (acrux.has(m.mintA.toBase58()) || acrux.has(m.mintB.toBase58())) &&
     !hidden.has(m.mintA.toBase58()) && !hidden.has(m.mintB.toBase58()))
 }
 
@@ -203,6 +204,9 @@ export function marketQuote(m: Market, amountIn: bigint, aToB: boolean): bigint 
 /** ACRUX per whole token, for every token we can price: coins still on their curve
  * (priced by the curve) and anything with a pool against wrapped ACRUX (priced by its
  * deepest pool, which wins over the curve once a coin graduates). */
+/** SPL Token's standard wrapped-native mint: ACRUX 1:1 on Acrux from slot 6,480,000. */
+export const NATIVE_ACRUX_MINT = 'So11111111111111111111111111111111111111112'
+
 export async function acruxPrices(conn: Connection, wacrux: string): Promise<Map<string, number>> {
   const out = new Map<string, number>()
   const lp = launchpadProgram(readProvider(conn))
@@ -215,14 +219,15 @@ export async function acruxPrices(conn: Connection, wacrux: string): Promise<Map
     const quotes = await conn.getMultipleParsedAccounts(onCurve.map(l => l.account.curveQuote as PublicKey)).catch(() => null)
     onCurve.forEach((l, i) => {
       const info = (quotes?.value[i]?.data as any)?.parsed?.info
-      if (info?.mint !== wacrux) return
+      if (info?.mint !== wacrux && info?.mint !== NATIVE_ACRUX_MINT) return
       const vq = Number(l.account.virtualQuote.toString()), vt = Number(l.account.virtualTokens.toString())
       if (vt > 0) out.set(l.account.mint.toBase58(), (vq / vt) * 10 ** (6 - 9))
     })
   }
   const depth = new Map<string, bigint>()
   for (const m of markets) {
-    const aW = m.mintA.toBase58() === wacrux, bW = m.mintB.toBase58() === wacrux
+    const isA = (s: string) => s === wacrux || s === NATIVE_ACRUX_MINT
+    const aW = isA(m.mintA.toBase58()), bW = isA(m.mintB.toBase58())
     if (aW === bW) continue
     const [tok, tokR, tokD, wR] = aW ? [m.mintB.toBase58(), m.reserveB, m.decimalsB, m.reserveA] : [m.mintA.toBase58(), m.reserveA, m.decimalsA, m.reserveB]
     if (wR <= (depth.get(tok) ?? 0n)) continue

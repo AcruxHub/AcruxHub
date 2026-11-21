@@ -333,9 +333,16 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
     if (ts.length) out.unshift({ time: ts[0].time - 1, value: openingPrice(ts[0], a.feeBps, ts[0].vq, ts[0].vt) * scale })
     return out
   }, [trades.data, qd])
-  const first = pts[0]?.value
   const now = mk.price
-  const change = first ? (now / first - 1) * 100 : 0
+  // 24h change: against the last price at or before 24 hours ago. A coin younger than a
+  // day compares with its first trade (not the curve's opening price, which is tiny).
+  const dayAgo = useMemo(() => {
+    const cutoff = Date.now() / 1000 - 86_400
+    let base: number | undefined
+    for (const p of pts.slice(1)) { if (p.time <= cutoff) base = p.value; else break }
+    return base ?? pts[1]?.value
+  }, [pts])
+  const change = dayAgo ? (now / dayAgo - 1) * 100 : 0
   // Real balances from the chain; until they load (or if the read fails), fall back to curve trades.
   const chainHolders = useAsync(() => loadHolders(w.conn, a.mint, a.curveTokens, LOCKER_ID), [w.conn, a.mint.toBase58(), w.refreshKey])
   const holders = useMemo<Holder[]>(() => chainHolders.data ?? holdersFromTrades(trades.data ?? []).map(([owner, amount]) => ({ owner, amount, kind: 'wallet' as const })), [chainHolders.data, trades.data])
@@ -362,7 +369,7 @@ function Coin({ l, quoteMint, quoteSym, qd, totalSupply, upgraded, paused }: { l
           <div className="stats">
             <div><span className="label">Market cap</span><span className="value">{usdRate && quoteSym === 'ACRUX' ? <>{usd(mk.mcap * usdRate)}<small className="stat-sub">{compact(mk.mcap)} ACRUX</small></> : <>{compact(mk.mcap)} <small>{quoteSym}</small></>}</span></div>
             <div><span className="label">Price</span><span className="value"><Price text={fmtPrice(now)} />{usdRate && quoteSym === 'ACRUX' && <small className="stat-sub">≈ {usd(now * usdRate)}</small>}</span></div>
-            <div><span className="label">Change</span><span className={`value ${change >= 0 ? 'up' : 'down'}`}>{pts.length ? `${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '–'}</span></div>
+            <div><span className="label">24h</span><span className={`value ${change >= 0 ? 'up' : 'down'}`}>{dayAgo ?`${change >= 0 ? '+' : ''}${change.toFixed(1)}%` : '–'}</span></div>
             <div><span className="label">Trades</span><span className="value">{trades.data ? trades.data.length : '…'}</span></div>
           </div>
 

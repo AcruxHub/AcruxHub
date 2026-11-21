@@ -7,7 +7,7 @@ import { useAsync, tokenLabel } from '../hooks.ts'
 import { loadMarkets, launchSymbols, marketQuote, marketName, type Market } from '../data.ts'
 import { fmt, parseAmount } from '../net.ts'
 import { Action, Empty } from '../ui.tsx'
-import { wrapFor, spendable } from '../wrap.ts'
+import { wrapFor, spendable, isNativeMint, unwrapNativeMint } from '../wrap.ts'
 
 const pairKey = (m: Market) => `${m.mintA.toBase58()}|${m.mintB.toBase58()}`
 const pct = (ppm: bigint) => `${(Number(ppm) / 10_000).toFixed(2)}%`
@@ -201,7 +201,9 @@ export function Swap() {
               })
               const m = best!.m
               const wrap = await wrapFor(w.conn, w.provider!, w.publicKey!, inMint!, raw!)
-              const tx = new Transaction().add(...wrap, ...ixs)
+              // Receiving the standard wrapped ACRUX: unwrap it back to plain ACRUX in the same transaction.
+              const unwrap = outMint && isNativeMint(outMint) ? [unwrapNativeMint(w.publicKey!)] : []
+              const tx = new Transaction().add(...wrap, ...ixs, ...unwrap)
               const sealed = w.privateMode
               const sig = await w.send(tx)
               setLastSend(sealed ? 'private' : 'public')
