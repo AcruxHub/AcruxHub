@@ -15,7 +15,7 @@ import { NETWORKS, connectionFor, type Network } from './net.ts'
 
 type Injected = {
   publicKey?: PublicKey
-  connect(): Promise<{ publicKey: PublicKey }>
+  connect(opts?: { onlyIfTrusted?: boolean }): Promise<{ publicKey: PublicKey }>
   disconnect?(): Promise<void>
   signTransaction(tx: Transaction): Promise<Transaction>
   signMessage?(msg: Uint8Array): Promise<{ signature: Uint8Array } | Uint8Array>
@@ -49,6 +49,8 @@ type Ctx = {
 const WalletContext = createContext<Ctx | null>(null)
 const KEY_STORE = 'acruxhub.testWallet'
 const NET_STORE = 'acruxhub.network'
+/** Which wallet the visitor last chose: 'key' | 'injected' | 'none'. */
+const CHOICE_STORE = 'acruxhub.walletChoice'
 
 
 function injected(): Injected | null {
@@ -72,8 +74,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   // Production builds only talk to Acrux Net; the local chain is a dev tool.
   const network = (import.meta.env.DEV && NETWORKS[netId]) || NETWORKS.acrux
   const conn = useMemo(() => connectionFor(network), [network])
-  const [test, setTest] = useState<Keypair | null>(storedKey)
+  // The wallet this visitor last chose ('key' | 'injected' | 'none'). Before this was kept,
+  // a saved browser key always reconnected on load, so Phantom users had to disconnect it
+  // and reconnect Phantom on every visit. Visitors from before (no choice saved) keep their key.
+  const [test, setTest] = useState<Keypair | null>(() => (['injected', 'none'].includes(store.get(CHOICE_STORE) ?? '') ? null : storedKey()))
   const [inj, setInj] = useState<{ w: Injected; pk: PublicKey } | null>(null)
+  // Chose Phantom/Backpack last time: reconnect quietly (onlyIfTrusted shows no popup).
+  useEffect(() => {
+    if (store.get(CHOICE_STORE) !== 'injected') return
+    const w = injected()
+    if (!w) return
+    let live = true
+    w.connect({ onlyIfTrusted: true }).then(({ publicKey }) => { if (live) setInj({ w, pk: new PublicKey(publicKey.toString()) }) }, () => {})
+    return () => { live = false }
+  }, [])
   const [privateMode, setPrivateMode] = useState(true)
   const [refreshKey, setRefresh] = useState(0)
 
@@ -90,6 +104,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     // and a fresh key here would overwrite the old one and strand its funds.
     const kp = test ?? storedKey() ?? Keypair.generate()
     store.set(KEY_STORE, JSON.stringify(Array.from(kp.secretKey)))
+    store.set(CHOICE_STORE, 'key')
     setInj(null)
     setTest(kp)
   }, [test])
@@ -105,6 +120,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     if (bytes.length !== 64) throw new Error(`A secret key is 64 bytes; this one is ${bytes.length}.`)
     const kp = Keypair.fromSecretKey(bytes)
     store.set(KEY_STORE, JSON.stringify(Array.from(kp.secretKey)))
+    store.set(CHOICE_STORE, 'key')
     setInj(null)
     setTest(kp)
   }, [])
@@ -113,11 +129,15 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const w = injected()
     if (!w) throw new Error('No Solana wallet extension found. Use the test wallet, or install Phantom or Backpack.')
     const { publicKey } = await w.connect()
+    store.set(CHOICE_STORE, 'injected')
+    // Phantom now owns the session: the saved browser key stays saved (Browser key brings it back) but isn't active.
+    setTest(null)
     setInj({ w, pk: new PublicKey(publicKey.toString()) })
   }, [])
 
   const disconnect = useCallback(() => {
     inj?.w.disconnect?.().catch(() => {})
+    store.set(CHOICE_STORE, 'none')
     setInj(null)
     setTest(null)
   }, [inj])

@@ -117,13 +117,16 @@ export function App() {
           <a href="#Docs/fees">Fees</a>
           <a href="#Docs/security">Security</a>
           <a href="#Bridge">Bridge</a>
+          <a href="#Pools">Pools</a>
+          <a href="#Portfolio">Portfolio</a>
+          <a href="#Explorer">Explorer</a>
         </div>
         <span>Independent project, not affiliated with Acrux. The code is unaudited: use it at your own risk, only with amounts you can afford to lose.</span>
       </footer>
 
       <nav className="mobile-nav" aria-label="Main">
-        {/* Inside Telegram and the phone apps, Bridge takes Pools' spot: it's how people fund the wallet. */}
-        {NAV.filter(n => ['Launch', 'Swap', 'Wallet', inApp ? 'Bridge' : 'Pools', 'Locks'].includes(n.route)).map(n => (
+        {/* Bridge takes Pools' spot on every phone: it's how people get ACRUX in (and out). Pools stays in the top menu. */}
+        {NAV.filter(n => ['Launch', 'Swap', 'Wallet', 'Bridge', 'Locks'].includes(n.route)).map(n => (
           <a key={n.route} href={`#${n.route}`} className={n.route === route ? 'on' : ''}>
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d={n.icon} /></svg>
             {n.label}
