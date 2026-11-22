@@ -2,6 +2,9 @@
 // exactly, in bigint) for the three AcruxHub programs.
 
 import * as anchor from '@coral-xyz/anchor'
+// BN straight from bn.js: under Node 22 the anchor namespace import has no BN (the
+// buyback's payout crashed on "anchor.BN is not a constructor").
+import BNjs from 'bn.js'
 import { Program, type Provider } from '@coral-xyz/anchor'
 import { PublicKey, type Connection } from '@solana/web3.js'
 import { getAssociatedTokenAddressSync } from '@solana/spl-token'
@@ -278,14 +281,14 @@ export const approvalAddress = (p: Payload) => pda([enc('approval'), payloadDige
 /** Anchor-shaped payload argument. */
 export const payloadArg = (p: Payload) => ({
   sourceChain: p.sourceChain,
-  nonce: new anchor.BN(p.nonce.toString()),
+  nonce: new BNjs(p.nonce.toString()),
   destChain: p.destChain,
   destMint: p.destMint,
   recipient: p.recipient,
-  amount: new anchor.BN(p.amount.toString()),
+  amount: new BNjs(p.amount.toString()),
 })
 
-export const BN = anchor.BN
+export const BN = BNjs
 
 /**
  * All accounts of one type owned by a program, filtered client-side. Acrux Net's
@@ -322,14 +325,14 @@ export const wacruxMint = () => pda([enc('mint')], WACRUX_ID)
 
 /** Wraps `lamports` ACRUX into the user's wACRUX account (created if needed). */
 export function wrapInstruction(program: Program<AcruxhubWacrux>, user: PublicKey, lamports: bigint) {
-  return program.methods.wrap(new anchor.BN(lamports.toString())).accountsPartial({
+  return program.methods.wrap(new BNjs(lamports.toString())).accountsPartial({
     user, vault: wacruxVault(), mint: wacruxMint(), userTokens: getAssociatedTokenAddressSync(wacruxMint(), user),
   }).instruction()
 }
 
 /** Unwraps `amount` wACRUX back into native ACRUX. */
 export function unwrapInstruction(program: Program<AcruxhubWacrux>, user: PublicKey, amount: bigint) {
-  return program.methods.unwrap(new anchor.BN(amount.toString())).accountsPartial({
+  return program.methods.unwrap(new BNjs(amount.toString())).accountsPartial({
     user, vault: wacruxVault(), mint: wacruxMint(), userTokens: getAssociatedTokenAddressSync(wacruxMint(), user),
   }).instruction()
 }
@@ -360,7 +363,7 @@ export async function loadLocks(conn: Connection, program: Program<AcruxhubLocke
 
 /** Locks `amount` of `mint` from the owner's token account until `unlockTs` (unix seconds). */
 export function lockInstruction(program: Program<AcruxhubLocker>, owner: PublicKey, mint: PublicKey, id: bigint, amount: bigint, unlockTs: number) {
-  return program.methods.lock(new anchor.BN(id.toString()), new anchor.BN(amount.toString()), new anchor.BN(unlockTs)).accountsPartial({
+  return program.methods.lock(new BNjs(id.toString()), new BNjs(amount.toString()), new BNjs(unlockTs)).accountsPartial({
     owner, mint, lock: lockAddress(owner, mint, id), ownerTokens: getAssociatedTokenAddressSync(mint, owner),
   }).instruction()
 }
@@ -370,5 +373,5 @@ export function unlockInstruction(program: Program<AcruxhubLocker>, l: { owner: 
 }
 
 export function extendInstruction(program: Program<AcruxhubLocker>, l: { owner: PublicKey; address: PublicKey }, newUnlockTs: number) {
-  return program.methods.extend(new anchor.BN(newUnlockTs)).accountsPartial({ owner: l.owner, lock: l.address }).instruction()
+  return program.methods.extend(new BNjs(newUnlockTs)).accountsPartial({ owner: l.owner, lock: l.address }).instruction()
 }

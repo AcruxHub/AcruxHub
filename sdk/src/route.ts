@@ -4,7 +4,9 @@
 
 import type { PublicKey, TransactionInstruction } from '@solana/web3.js'
 import type { Program } from '@coral-xyz/anchor'
-import * as anchor from '@coral-xyz/anchor'
+// BN straight from bn.js: under Node 22 the anchor namespace import has no BN (the
+// buyback's payout crashed on "anchor.BN is not a constructor").
+import BNjs from 'bn.js'
 import {
   getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction,
 } from '@solana/spl-token'
@@ -61,7 +63,7 @@ export async function routedSwapInstructions(a: {
     if (!a.amm || a.deadlineSlot == null) throw new Error('AcruxHub route needs the AMM program and a deadline slot')
     const p = m.amm!
     ixs.push(await a.amm.methods
-      .swap(new anchor.BN(net.toString()), new anchor.BN(a.minOut.toString()), a.aToB, new anchor.BN(a.deadlineSlot))
+      .swap(new BNjs(net.toString()), new BNjs(a.minOut.toString()), a.aToB, new BNjs(a.deadlineSlot))
       .accountsPartial({
         user: a.user, pool: p.address, mintA: m.mintA, mintB: m.mintB, vaultA: p.vaultA, vaultB: p.vaultB,
         userA: getAssociatedTokenAddressSync(m.mintA, a.user), userB: getAssociatedTokenAddressSync(m.mintB, a.user),
